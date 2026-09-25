@@ -321,6 +321,23 @@ def set_webhook():
         "webhook_url": webhook_url
     })
 
+@app.route("/debug_gemini", methods=["GET"])
+def debug_gemini():
+    logs = []
+    for model_name in AVAILABLE_MODELS:
+        try:
+            m = genai.GenerativeModel(model_name)
+            resp = m.generate_content("Diga OK")
+            logs.append(f"{model_name}: SUCESSO -> {resp.text.strip()}")
+            break
+        except Exception as e:
+            logs.append(f"{model_name}: ERRO -> {type(e).__name__}: {str(e)}")
+    return jsonify({
+        "gemini_key_len": len(GEMINI_KEY),
+        "gemini_key_prefix": GEMINI_KEY[:8] if GEMINI_KEY else "VAZIO",
+        "models_tried": logs
+    })
+
 @app.route("/test_ai", methods=["GET"])
 def test_ai():
     q = request.args.get("q", "Qual a data mais recente?")
