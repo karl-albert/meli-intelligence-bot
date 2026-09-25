@@ -125,18 +125,20 @@ def enviar_mensagem(chat_id, texto):
         logger.error(f"Erro ao enviar para Telegram: {e}")
         return False
 
-def formatar_resultado_python(df_res, user_name, pergunta_usuario):
-    if df_res.empty:
+def formatar_resultado_python(col_names, rows, user_name, pergunta_usuario):
+    if not rows:
         return f"Fala {user_name}! Não encontrei registros na base oficial para a sua pergunta."
     
     linhas = [f"📊 *Fala {user_name}! Segue o resultado da consulta:*\n"]
     linhas.append(f"🔍 _\"{pergunta_usuario}\"_\n")
     
-    if len(df_res) == 1 and len(df_res.columns) == 1:
-        col = df_res.columns[0]
-        val = df_res.iloc[0, 0]
-        if isinstance(val, (int, float)):
-            if "fat" in col.lower() or "preco" in col.lower() or "ticket" in col.lower():
+    if len(rows) == 1 and len(col_names) == 1:
+        col = col_names[0]
+        val = rows[0][0]
+        if val is None:
+            val_fmt = "0"
+        elif isinstance(val, (int, float)):
+            if any(k in col.lower() for k in ["fat", "preco", "ticket", "receita", "valor"]):
                 val_fmt = f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
             else:
                 val_fmt = f"{val:,.0f}".replace(",", ".")
@@ -144,12 +146,29 @@ def formatar_resultado_python(df_res, user_name, pergunta_usuario):
             val_fmt = str(val)
         col_nome = col.replace("_", " ").title()
         linhas.append(f"📦 *{col_nome}:* `{val_fmt}`\n")
+    elif len(rows) == 1 and len(col_names) <= 5:
+        for col, val in zip(col_names, rows[0]):
+            if val is None:
+                val_fmt = "0"
+            elif isinstance(val, float):
+                if any(k in col.lower() for k in ["fat", "preco", "ticket", "receita"]):
+                    val_fmt = f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                else:
+                    val_fmt = f"{val:,.0f}".replace(",", ".")
+            elif isinstance(val, int):
+                val_fmt = f"{val:,.0f}".replace(",", ".")
+            else:
+                val_fmt = str(val)
+            col_nome = col.replace("_", " ").title()
+            linhas.append(f"• *{col_nome}:* `{val_fmt}`")
     else:
-        for idx, row in df_res.head(8).iterrows():
+        for row in rows[:8]:
             itens = []
-            for col, val in row.items():
-                if isinstance(val, float):
-                    if "fat" in col.lower() or "preco" in col.lower():
+            for col, val in zip(col_names, row):
+                if val is None:
+                    v_str = "-"
+                elif isinstance(val, float):
+                    if any(k in col.lower() for k in ["fat", "preco"]):
                         v_str = f"R$ {val:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                     else:
                         v_str = f"{val:,.0f}".replace(",", ".")
@@ -160,8 +179,8 @@ def formatar_resultado_python(df_res, user_name, pergunta_usuario):
                 itens.append(f"*{col.replace('_', ' ').title()}:* {v_str}")
             linhas.append("• " + " | ".join(itens))
         
-        if len(df_res) > 8:
-            linhas.append(f"\n_... e mais {len(df_res) - 8} registros encontrados._")
+        if len(rows) > 8:
+            linhas.append(f"\n_... e mais {len(rows) - 8} registros encontrados._")
 
     linhas.append(f"\n📌 _Dados oficiais da base do Mercado Livre (Power BI) · Atualizado até {data_recente}_")
     return "\n".join(linhas)
@@ -249,16 +268,25 @@ Responda APENAS com a query SQL dentro de ```sql ... ``` ou com a palavra NAO_SQ
             clean_sql = resp_sql.replace("```sql", "").replace("```", "").strip()
 
         logger.info(f"SQL a executar: {clean_sql}")
-        df_res = con.execute(clean_sql).df()
-        logger.info(f"DuckDB: {len(df_res)} linhas")
+        cur = con.execute(clean_sql)
+        col_names = [d[0] for d in cur.description]
+        rows = cur.fetchall()
+        logger.info(f"DuckDB: {len(rows)} linhas")
         
+        if not rows:
+            return f"Fala {user_name}! Não foram encontrados registros na base para sua pesquisa."
+
+        header_str = " | ".join(col_names)
+        linhas_tab = [" | ".join([str(v) if v is not None else "NULL" for v in r]) for r in rows[:15]]
+        tabela_str = f"{header_str}\n" + ("-" * len(header_str)) + "\n" + "\n".join(linhas_tab)
+
         prompt_formatacao = f"""
 Você é o assistente virtual executivo 'Meli Intelligence Bot' do time comercial do Mercado Livre.
 O representante de vendas '{user_name}' perguntou: "{texto_msg}"
 Data mais recente da base: {data_recente}.
 
 O resultado obtido no banco de dados oficial foi:
-{df_res.to_string()}
+{tabela_str}
 
 Formate a resposta para o Telegram:
 - Comece com uma saudação amigável: "Fala {user_name}!..."
@@ -271,11 +299,11 @@ Formate a resposta para o Telegram:
         if resp_final:
             return resp_final
         else:
-            return formatar_resultado_python(df_res, user_name, texto_msg)
+            return formatar_resultado_python(col_names, rows, user_name, texto_msg)
             
     except Exception as e:
         logger.error(f"Erro IA/DuckDB: {e}")
-        return formatar_resultado_python(df_res, user_name, texto_msg) if 'df_res' in locals() else None
+        return formatar_resultado_python(col_names, rows, user_name, texto_msg) if ('col_names' in locals() and 'rows' in locals()) else None
 
 # ==============================================================================
 # ROTAS FLASK PARA O RENDER.COM
