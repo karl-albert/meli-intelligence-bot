@@ -125,6 +125,81 @@ def enviar_mensagem(chat_id, texto):
         logger.error(f"Erro ao enviar para Telegram: {e}")
         return False
 
+def transcrever_audio(audio_bytes, mime_type="audio/ogg"):
+    """Transcreve mensagem de voz do Telegram usando Google Gemini Multimodal"""
+    clean_mime = mime_type.split(";")[0].strip()
+    prompt = "Transcreva com máxima fidelidade o que foi falado neste áudio em português do Brasil. Retorne APENAS o texto falado, sem introduções, sem aspas e sem explicações."
+    part = {"mime_type": clean_mime, "data": audio_bytes}
+    for model_name in AVAILABLE_MODELS:
+        try:
+            m = genai.GenerativeModel(model_name)
+            resp = m.generate_content([part, prompt])
+            if resp and resp.text:
+                texto_limpo = resp.text.strip().replace('"', '').replace("'", "")
+                logger.info(f"Áudio transcrito via {model_name}: {texto_limpo}")
+                return texto_limpo
+        except Exception as e:
+            logger.warning(f"Tentativa transcrição áudio {model_name} falhou: {e}")
+            continue
+    return None
+
+def gerar_roteiro_fala(texto_resposta, user_name):
+    """Cria fala natural executiva para ser sintetizada em áudio"""
+    prompt_fala = f"""
+Você é o assistente virtual executivo Joca do Mercado Livre.
+Abaixo está a resposta em texto formatado para o Telegram:
+{texto_resposta}
+
+Crie um roteiro de fala conciso (de 10 a 15 segundos, no máximo 3 frases) para você falar em uma nota de voz para {user_name}.
+Regras obrigatórias:
+- Comece de forma amigável e dinâmica: "Fala {user_name}!..."
+- NÃO use asteriscos, hashtags, sublinhados, links, emojis ou marcadores de lista.
+- Diga valores monetários e números por extenso de forma falada natural (exemplo: 'três milhões cento e noventa e sete mil reais', 'nove mil vendas').
+- Retorne APENAS o texto a ser falado.
+"""
+    fala = chamar_gemini(prompt_fala)
+    if not fala:
+        fala = f"Fala {user_name}! Finalizei sua consulta com sucesso. Os dados completos já estão na sua tela."
+    
+    # Remove qualquer caractere que possa confundir o sintetizador de voz
+    for c in ["*", "#", "_", "`", "~", "[", "]", "(", ")", ">", "<"]:
+        fala = fala.replace(c, "")
+    return fala.strip()
+
+def enviar_voz(chat_id, texto_fala):
+    """Sintetiza áudio via gTTS e envia como mensagem de voz no Telegram"""
+    try:
+        from gtts import gTTS
+        import io
+        tts = gTTS(text=texto_fala, lang="pt", tld="com.br")
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        fp.seek(0)
+        audio_data = fp.getvalue()
+        
+        # 1. Tenta enviar como nota de voz nativa (sendVoice)
+        url_voice = f"{BASE_TELEGRAM_URL}/sendVoice"
+        files_voice = {"voice": ("joca_audio.mp3", audio_data, "audio/mpeg")}
+        res_v = requests.post(url_voice, data={"chat_id": chat_id}, files=files_voice, timeout=25)
+        if res_v.status_code == 200 and res_v.json().get("ok"):
+            logger.info(f"Nota de voz enviada com sucesso para chat {chat_id}")
+            return True
+            
+        # 2. Fallback para sendAudio caso o cliente Telegram prefira áudio padrão
+        logger.warning(f"sendVoice retornou: {res_v.text}. Tentando sendAudio...")
+        url_audio = f"{BASE_TELEGRAM_URL}/sendAudio"
+        files_audio = {"audio": ("joca_audio.mp3", audio_data, "audio/mpeg")}
+        res_a = requests.post(
+            url_audio, 
+            data={"chat_id": chat_id, "title": "Joca Responde", "performer": "Joca Meli Bot"}, 
+            files=files_audio, 
+            timeout=25
+        )
+        return res_a.status_code == 200 and res_a.json().get("ok")
+    except Exception as e:
+        logger.error(f"Erro ao sintetizar/enviar áudio para Telegram: {e}")
+        return False
+
 def formatar_resultado_python(col_names, rows, user_name, pergunta_usuario):
     if not rows:
         return f"Fala {user_name}! Não encontrei registros na base oficial para a sua pergunta."
@@ -194,13 +269,14 @@ def processar_pergunta(texto_msg, user_name):
             f"👋 *Fala {user_name}! Eu sou o Meli Intelligence Bot (Render 24/7).*\n\n"
             f"Estou com a IA do **Google Gemini** integrada à base oficial de Mais Vendidos do Mercado Livre.\n"
             f"📅 *Base atualizada até:* `{data_recente}` ({total_registros:,} registros sincronizados).\n\n"
-            f"💡 *Você pode me perguntar QUALQUER coisa em linguagem natural:*\n"
+            f"🎙️ *Modo Voz Ativo:* Você pode mandar **mensagem de voz / áudio** no Telegram que eu compreendo perfeitamente e te respondo falando!\n\n"
+            f"💡 *Exemplos de perguntas (em texto ou por áudio):*\n"
             f"• _\"Qual a quantidade de vendas total até agora no MTD?\"_\n"
             f"• _\"Quantos produtos no total da Apple venderam hoje?\"_\n"
             f"• _\"Qual o faturamento total de hoje?\"_\n"
             f"• _\"Qual o produto mais vendido de informática?\"_\n"
             f"• _\"Qual a data mais recente da base?\"_\n\n"
-            f"Pode mandar do jeito que você preferir!"
+            f"Pode mandar por texto ou áudio do jeito que você preferir!"
         )
     
     # 2. Exemplo do Slide
@@ -343,14 +419,45 @@ def webhook():
         return jsonify({"status": "no payload"}), 200
 
     msg = payload.get("message")
-    if not msg or "text" not in msg:
-        return jsonify({"status": "ignored"}), 200
+    if not msg:
+        return jsonify({"status": "no message"}), 200
 
-    chat_id = msg["chat"]["id"]
+    chat_id = msg.get("chat", {}).get("id")
+    if not chat_id:
+        return jsonify({"status": "no chat_id"}), 200
+
     user_name = msg.get("from", {}).get("first_name", "Parceiro")
-    texto = msg["text"]
+    texto = None
+    origem_audio = False
 
-    logger.info(f"Mensagem de {user_name} (Chat {chat_id}): {texto}")
+    # 1. Tratamento de Áudio / Mensagem de Voz recebida
+    if "voice" in msg or "audio" in msg:
+        media_obj = msg.get("voice") or msg.get("audio")
+        file_id = media_obj.get("file_id")
+        mime_type = media_obj.get("mime_type", "audio/ogg")
+        logger.info(f"Áudio recebido de {user_name} (chat {chat_id}, mime={mime_type}). Baixando...")
+        try:
+            requests.post(f"{BASE_TELEGRAM_URL}/sendChatAction", json={"chat_id": chat_id, "action": "record_voice"}, timeout=5)
+            get_f = requests.get(f"{BASE_TELEGRAM_URL}/getFile?file_id={file_id}", timeout=10).json()
+            if get_f.get("ok"):
+                f_path = get_f["result"]["file_path"]
+                dl_url = f"https://api.telegram.org/file/bot{TOKEN}/{f_path}"
+                audio_bytes = requests.get(dl_url, timeout=20).content
+                texto = transcrever_audio(audio_bytes, mime_type)
+                origem_audio = True
+                logger.info(f"Transcrição do áudio de {user_name}: {texto}")
+        except Exception as e_audio:
+            logger.error(f"Erro ao processar áudio recebido: {e_audio}")
+            enviar_mensagem(chat_id, "🎙️ Não consegui ouvir seu áudio com clareza. Poderia repetir ou digitar?")
+            return jsonify({"status": "audio error"}), 200
+
+    elif "text" in msg:
+        texto = msg["text"]
+
+    if not texto:
+        return jsonify({"status": "no text to process"}), 200
+
+    logger.info(f"Mensagem de {user_name} (Chat {chat_id}, via_voz={origem_audio}): {texto}")
     
     resposta = processar_pergunta(texto, user_name)
     if not resposta:
@@ -363,7 +470,20 @@ def webhook():
             f"• *\"Qual a data mais recente da base?\"*"
         )
 
+    # 1. Envia a resposta textual rica para o Telegram
     enviar_mensagem(chat_id, resposta)
+    
+    # 2. Se o usuário enviou por voz OU pediu resposta em áudio no texto
+    quer_audio = origem_audio or any(w in texto.lower() for w in ["áudio", "audio", "por voz", "em voz", "fale", "mande áudio", "manda áudio", "voz"])
+    if quer_audio:
+        try:
+            requests.post(f"{BASE_TELEGRAM_URL}/sendChatAction", json={"chat_id": chat_id, "action": "record_voice"}, timeout=5)
+            fala = gerar_roteiro_fala(resposta, user_name)
+            logger.info(f"Enviando voz para {user_name}: {fala}")
+            enviar_voz(chat_id, fala)
+        except Exception as e_voz:
+            logger.error(f"Erro ao gerar/enviar voz de resposta: {e_voz}")
+
     return jsonify({"status": "success"}), 200
 
 @app.route("/set_webhook", methods=["GET"])
@@ -402,6 +522,19 @@ def test_ai():
     q = request.args.get("q", "Qual a data mais recente?")
     resp = processar_pergunta(q, "Karl")
     return jsonify({"pergunta": q, "resposta": resp})
+
+@app.route("/test_voice", methods=["GET"])
+def test_voice():
+    text = request.args.get("text", "Fala Karl! O Joca agora responde por voz e texto.")
+    try:
+        from gtts import gTTS
+        import io
+        tts = gTTS(text=text, lang="pt", tld="com.br")
+        fp = io.BytesIO()
+        tts.write_to_fp(fp)
+        return jsonify({"status": "success", "audio_bytes": len(fp.getvalue()), "text": text})
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
