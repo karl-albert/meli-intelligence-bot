@@ -26,8 +26,15 @@ import base64
 _B64_TOK = "ODkxNjczMzY3MTpBQUgxaHR2ZDZWcURLc25nZHlZc0ZPYVhkdk5nVVEwUmp5TQ=="
 _B64_GEM = "QVEuQWI4Uk42S3RWbzR3RkhZTVA4a3FiMXplWXo2dmRTLVRrakd3ZG1yY18xbzY4MURuUUE="
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN") or base64.b64decode(_B64_TOK).decode("utf-8")
-GEMINI_KEY = os.environ.get("GEMINI_KEY") or base64.b64decode(_B64_GEM).decode("utf-8")
+FALLBACK_KEY = base64.b64decode(_B64_GEM).decode("utf-8").strip()
+FALLBACK_TOKEN = base64.b64decode(_B64_TOK).decode("utf-8").strip()
+
+env_key = os.environ.get("GEMINI_KEY", "").strip()
+GEMINI_KEY = env_key if (env_key and len(env_key) > 20) else FALLBACK_KEY
+
+env_token = os.environ.get("TELEGRAM_TOKEN", "").strip()
+TOKEN = env_token if (env_token and len(env_token) > 20) else FALLBACK_TOKEN
+
 BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN}"
 
 # Configurar Gemini
@@ -36,8 +43,8 @@ AVAILABLE_MODELS = [
     "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
     "gemini-3.5-flash-lite",
-    "gemini-1.5-flash",
-    "gemini-2.0-flash"
+    "gemini-2.5-flash",
+    "gemini-flash-latest"
 ]
 
 # Inicializar DuckDB
@@ -80,13 +87,23 @@ def chamar_gemini(prompt):
                 return resp.text.strip()
         except Exception as e:
             err_msg = str(e)
-            if "429" in err_msg or "ResourceExhausted" in err_msg:
+            logger.error(f"Erro Gemini {model_name}: {err_msg}")
+            if "401" in err_msg or "Unauthenticated" in err_msg or "invalid authentication" in err_msg.lower():
+                try:
+                    logger.info("Reconfigurando com chave garantida...")
+                    genai.configure(api_key=FALLBACK_KEY)
+                    m = genai.GenerativeModel(model_name)
+                    resp = m.generate_content(prompt)
+                    if resp and resp.text:
+                        return resp.text.strip()
+                except Exception as e2:
+                    logger.error(f"Erro fallback: {e2}")
+            elif "429" in err_msg or "ResourceExhausted" in err_msg:
                 logger.info(f"Cota 429 em {model_name}, alternando...")
                 continue
             elif "404" in err_msg or "NotFound" in err_msg:
                 continue
             else:
-                logger.error(f"Erro Gemini {model_name}: {e}")
                 continue
     return None
 
@@ -179,6 +196,20 @@ def processar_pergunta(texto_msg, user_name):
             f"📌 _Hoje a base já está atualizada com dados em tempo real até {data_recente}!_"
         )
 
+    # 2.5 Quick Patterns para alta velocidade e confiabilidade absoluta
+    clean_sql = None
+    if "data" in t_lower and ("recente" in t_lower or "ultima" in t_lower or "última" in t_lower or "atualizada" in t_lower):
+        clean_sql = f"SELECT '{data_recente}' AS data_mais_recente, COUNT(*) AS total_registros FROM fato_ml"
+    elif ("faturamento" in t_lower or "faturou" in t_lower or "quanto vendeu" in t_lower) and ("hoje" in t_lower or "25/09" in t_lower or "25/09/2026" in t_lower):
+        if "apple" in t_lower:
+            clean_sql = f"SELECT SUM(fat_num) AS faturamento_apple_hoje, SUM(qtd_vendas_num) AS vendas_apple_hoje FROM fato_ml WHERE data = '{data_recente}' AND marca ILIKE '%Apple%'"
+        else:
+            clean_sql = f"SELECT SUM(fat_num) AS faturamento_hoje, SUM(qtd_vendas_num) AS total_vendas_hoje FROM fato_ml WHERE data = '{data_recente}'"
+    elif "faturamento total" in t_lower or "total faturamento" in t_lower or "faturamento da base" in t_lower:
+        clean_sql = "SELECT SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_vendas FROM fato_ml"
+    elif "vendas total" in t_lower or "total vendas" in t_lower or "total de vendas" in t_lower:
+        clean_sql = "SELECT SUM(qtd_vendas_num) AS total_vendas, SUM(fat_num) AS faturamento_total FROM fato_ml"
+
     # 3. Text-to-SQL com Gemini + DuckDB
     prompt_sql = f"""
 Você é o motor analítico SQL DuckDB do Mercado Livre Brasil.
@@ -211,13 +242,13 @@ Se a pergunta não for analítica sobre dados (ex: 'oi', 'quem é você'), retor
 Responda APENAS com a query SQL dentro de ```sql ... ``` ou com a palavra NAO_SQL.
 """
     try:
-        resp_sql = chamar_gemini(prompt_sql)
-        if not resp_sql or "NAO_SQL" in resp_sql:
-            return None
-            
-        clean_sql = resp_sql.replace("```sql", "").replace("```", "").strip()
-        logger.info(f"SQL Gemini: {clean_sql}")
-        
+        if not clean_sql:
+            resp_sql = chamar_gemini(prompt_sql)
+            if not resp_sql or "NAO_SQL" in resp_sql:
+                return None
+            clean_sql = resp_sql.replace("```sql", "").replace("```", "").strip()
+
+        logger.info(f"SQL a executar: {clean_sql}")
         df_res = con.execute(clean_sql).df()
         logger.info(f"DuckDB: {len(df_res)} linhas")
         
@@ -244,7 +275,7 @@ Formate a resposta para o Telegram:
             
     except Exception as e:
         logger.error(f"Erro IA/DuckDB: {e}")
-        return None
+        return formatar_resultado_python(df_res, user_name, texto_msg) if 'df_res' in locals() else None
 
 # ==============================================================================
 # ROTAS FLASK PARA O RENDER.COM
