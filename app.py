@@ -322,19 +322,34 @@ def processar_pergunta(texto_msg, user_name):
 
     # 2.5 Quick Patterns para alta velocidade e confiabilidade absoluta
     clean_sql = None
-    if "data" in t_lower and ("recente" in t_lower or "ultima" in t_lower or "última" in t_lower or "atualizada" in t_lower):
+    eh_hoje = any(w in t_lower for w in ["hoje", "atual", "recente", "último dia", "ultimo dia", "dia mais recente", "entrou", "neste momento", "neste dia"])
+
+    if "data" in t_lower and ("recente" in t_lower or "ultima" in t_lower or "última" in t_lower or "atualizada" in t_lower or "base" in t_lower):
         clean_sql = f"SELECT '{data_recente}' AS data_mais_recente, COUNT(*) AS total_registros FROM fato_ml"
-    elif ("faturamento" in t_lower or "faturou" in t_lower or "quanto vendeu" in t_lower) and ("hoje" in t_lower or "25/09" in t_lower or "25/09/2026" in t_lower):
+    elif eh_hoje and any(w in t_lower for w in ["venda", "fatur", "quanto", "número", "numero", "resultado", "desempenho", "pedidos", "volume"]):
         if "apple" in t_lower:
-            clean_sql = f"SELECT SUM(fat_num) AS faturamento_apple_hoje, SUM(qtd_vendas_num) AS vendas_apple_hoje FROM fato_ml WHERE data = '{data_recente}' AND marca ILIKE '%Apple%'"
+            clean_sql = f"SELECT '{data_recente}' AS data_referencia, SUM(qtd_vendas_num) AS vendas_apple_hoje, SUM(fat_num) AS faturamento_apple_hoje FROM fato_ml WHERE data = '{data_recente}' AND marca ILIKE '%Apple%'"
+        elif "samsung" in t_lower:
+            clean_sql = f"SELECT '{data_recente}' AS data_referencia, SUM(qtd_vendas_num) AS vendas_samsung_hoje, SUM(fat_num) AS faturamento_samsung_hoje FROM fato_ml WHERE data = '{data_recente}' AND marca ILIKE '%Samsung%'"
         else:
-            clean_sql = f"SELECT SUM(fat_num) AS faturamento_hoje, SUM(qtd_vendas_num) AS total_vendas_hoje FROM fato_ml WHERE data = '{data_recente}'"
-    elif "faturamento total" in t_lower or "total faturamento" in t_lower or "faturamento da base" in t_lower:
+            clean_sql = f"SELECT '{data_recente}' AS data_referencia, SUM(qtd_vendas_num) AS total_vendas_hoje, SUM(fat_num) AS faturamento_hoje FROM fato_ml WHERE data = '{data_recente}'"
+    elif ("faturamento total" in t_lower or "total faturamento" in t_lower or "faturamento da base" in t_lower) and not eh_hoje:
         clean_sql = "SELECT SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_vendas FROM fato_ml"
-    elif "vendas total" in t_lower or "total vendas" in t_lower or "total de vendas" in t_lower:
+    elif ("vendas total" in t_lower or "total vendas" in t_lower or "total de vendas" in t_lower) and not eh_hoje:
         clean_sql = "SELECT SUM(qtd_vendas_num) AS total_vendas, SUM(fat_num) AS faturamento_total FROM fato_ml"
 
     # 3. Text-to-SQL com Gemini + DuckDB
+    try:
+        from datetime import datetime, timedelta
+        dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
+        ano_atual = dt_obj.year
+        mes_atual = dt_obj.month
+        ontem_str = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+    except Exception:
+        ano_atual = 2026
+        mes_atual = 9
+        ontem_str = "2026-09-25"
+
     prompt_sql = f"""
 Você é o motor analítico SQL DuckDB do Mercado Livre Brasil.
 A tabela DuckDB chama-se 'fato_ml'.
@@ -354,9 +369,10 @@ Schema da tabela:
 
 Contexto de negócio:
 - Data mais recente na base (considerada 'hoje' ou 'data atual'): '{data_recente}'.
-- MTD (Month to Date / acumulado do mês): ano = 2026 AND mes = 9 AND data <= '{data_recente}'.
-- YTD (Year to Date / acumulado do ano): ano = 2026 AND data <= '{data_recente}'.
-- Ontem: data = '2026-09-24'.
+- REGRA CRÍTICA: Se a pergunta mencionar 'hoje', 'dia atual', 'vendas que entraram' ou o dia mais recente, você OBRIGATORIAMENTE deve filtrar: WHERE data = '{data_recente}'.
+- MTD (Month to Date / acumulado do mês atual): ano = {ano_atual} AND mes = {mes_atual} AND data <= '{data_recente}'.
+- YTD (Year to Date / acumulado do ano atual): ano = {ano_atual} AND data <= '{data_recente}'.
+- Ontem: data = '{ontem_str}'.
 - Quando pedir marcas ou produtos, use ILIKE para evitar problemas de maiúsculas/minúsculas.
 
 Pergunta do usuário: "{texto_msg}"
