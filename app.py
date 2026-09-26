@@ -161,14 +161,14 @@ Abaixo está a resposta em texto formatado para o Telegram:
 
 Crie um roteiro de fala conciso (de 10 a 15 segundos, no máximo 3 frases) para você falar em uma nota de voz para {user_name}.
 Regras obrigatórias:
-- Comece de forma amigável e dinâmica: "Fala {user_name}!..."
+- Comece de forma amigável: "Olá {user_name}!..."
 - NÃO use asteriscos, hashtags, sublinhados, links, emojis ou marcadores de lista.
 - Diga valores monetários e números por extenso de forma falada natural.
 - Retorne APENAS o texto a ser falado.
 """
     fala = chamar_gemini(prompt_fala)
     if not fala:
-        fala = f"Fala {user_name}! Finalizei sua consulta com sucesso. Os dados completos já estão na sua tela."
+        fala = f"Olá {user_name}! Finalizei sua consulta com sucesso. Os dados completos já estão na sua tela."
     
     for c in ["*", "#", "_", "`", "~", "[", "]", "(", ")", ">", "<"]:
         fala = fala.replace(c, "")
@@ -379,9 +379,9 @@ Resultado obtido no banco oficial:
 {tabela_str}
 
 Formate a resposta para o Telegram:
-- Saudação amigável: "Fala {user_name}!..."
+- Saudação: "📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:"
 - Emojis comerciais e formatação em R$ ou quantidade.
-- Rodapé: "📌 _Dados oficiais da base do Mercado Livre (Power BI) · Atualizado até {data_recente}_"
+- Rodapé: "📌 _Dados da base do ML (Power BI) · Atualizado até {data_recente}_"
 """
         resp_final = chamar_gemini(prompt_formatacao)
         return resp_final if resp_final else formatar_resultado_python(col_names, rows, user_name, texto_msg)
