@@ -320,22 +320,43 @@ def processar_pergunta(texto_msg, user_name):
             f"📌 _Hoje a base já está atualizada com dados em tempo real até {data_recente}!_"
         )
 
-    # 2.5 Quick Patterns para alta velocidade e confiabilidade absoluta
+    # 2.5 Deteccao Inteligente de Datas e Quick Patterns
     clean_sql = None
-    eh_hoje = any(w in t_lower for w in ["hoje", "atual", "recente", "último dia", "ultimo dia", "dia mais recente", "entrou", "neste momento", "neste dia"])
+    import re
+    from datetime import datetime, timedelta
 
-    if "data" in t_lower and ("recente" in t_lower or "ultima" in t_lower or "última" in t_lower or "atualizada" in t_lower or "base" in t_lower):
+    data_alvo = None
+    m_iso = re.search(r'\b(202[5-9])-(\d{2})-(\d{2})\b', t_lower)
+    m_br = re.search(r'\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](202[5-9]))?\b', t_lower)
+    
+    if m_iso:
+        data_alvo = m_iso.group(0)
+    elif m_br:
+        d, m, y = m_br.groups()
+        y = y if y else "2026"
+        data_alvo = f"{y}-{int(m):02d}-{int(d):02d}"
+    elif "ontem" in t_lower:
+        try:
+            dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
+            data_alvo = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+        except Exception:
+            data_alvo = "2026-09-25"
+    elif any(w in t_lower for w in ["hoje", "atual", "recente", "último dia", "ultimo dia", "dia mais recente", "neste momento", "neste dia", "entrou"]):
+        data_alvo = str(data_recente)
+
+    if "data" in t_lower and ("recente" in t_lower or "ultima" in t_lower or "última" in t_lower or "atualizada" in t_lower or "base" in t_lower) and not (m_iso or m_br):
         clean_sql = f"SELECT '{data_recente}' AS data_mais_recente, COUNT(*) AS total_registros FROM fato_ml"
-    elif eh_hoje and any(w in t_lower for w in ["venda", "fatur", "quanto", "número", "numero", "resultado", "desempenho", "pedidos", "volume"]):
+    elif data_alvo and any(w in t_lower for w in ["venda", "fatur", "quanto", "número", "numero", "resultado", "desempenho", "pedidos", "volume"]):
+        d_br = f"{data_alvo[8:10]}/{data_alvo[5:7]}/{data_alvo[:4]}"
         if "apple" in t_lower:
-            clean_sql = f"SELECT '{data_recente}' AS data_referencia, SUM(qtd_vendas_num) AS vendas_apple_hoje, SUM(fat_num) AS faturamento_apple_hoje FROM fato_ml WHERE data = '{data_recente}' AND marca ILIKE '%Apple%'"
+            clean_sql = f"SELECT '{d_br}' AS data_referencia, SUM(qtd_vendas_num) AS vendas_apple, SUM(fat_num) AS faturamento_apple FROM fato_ml WHERE data = '{data_alvo}' AND marca ILIKE '%Apple%'"
         elif "samsung" in t_lower:
-            clean_sql = f"SELECT '{data_recente}' AS data_referencia, SUM(qtd_vendas_num) AS vendas_samsung_hoje, SUM(fat_num) AS faturamento_samsung_hoje FROM fato_ml WHERE data = '{data_recente}' AND marca ILIKE '%Samsung%'"
+            clean_sql = f"SELECT '{d_br}' AS data_referencia, SUM(qtd_vendas_num) AS vendas_samsung, SUM(fat_num) AS faturamento_samsung FROM fato_ml WHERE data = '{data_alvo}' AND marca ILIKE '%Samsung%'"
         else:
-            clean_sql = f"SELECT '{data_recente}' AS data_referencia, SUM(qtd_vendas_num) AS total_vendas_hoje, SUM(fat_num) AS faturamento_hoje FROM fato_ml WHERE data = '{data_recente}'"
-    elif ("faturamento total" in t_lower or "total faturamento" in t_lower or "faturamento da base" in t_lower) and not eh_hoje:
+            clean_sql = f"SELECT '{d_br}' AS data_referencia, SUM(qtd_vendas_num) AS total_vendas, SUM(fat_num) AS faturamento_total FROM fato_ml WHERE data = '{data_alvo}'"
+    elif ("faturamento total" in t_lower or "total faturamento" in t_lower or "faturamento da base" in t_lower) and not data_alvo:
         clean_sql = "SELECT SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_vendas FROM fato_ml"
-    elif ("vendas total" in t_lower or "total vendas" in t_lower or "total de vendas" in t_lower) and not eh_hoje:
+    elif ("vendas total" in t_lower or "total vendas" in t_lower or "total de vendas" in t_lower) and not data_alvo:
         clean_sql = "SELECT SUM(qtd_vendas_num) AS total_vendas, SUM(fat_num) AS faturamento_total FROM fato_ml"
 
     # 3. Text-to-SQL com Gemini + DuckDB
