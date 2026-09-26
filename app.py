@@ -166,26 +166,50 @@ Regras obrigatórias:
         fala = fala.replace(c, "")
     return fala.strip()
 
+async def _sintetizar_edge(texto):
+    import edge_tts
+    comm = edge_tts.Communicate(texto, "pt-BR-AntonioNeural")
+    chunks = bytearray()
+    async for c in comm.stream():
+        if c["type"] == "audio":
+            chunks.extend(c["data"])
+    return bytes(chunks)
+
 def enviar_voz(chat_id, texto_fala):
-    """Sintetiza áudio via gTTS e envia como mensagem de voz no Telegram"""
+    """Sintetiza áudio com voz masculina encorpada (pt-BR-AntonioNeural) e envia como mensagem de voz no Telegram"""
     try:
-        from gtts import gTTS
-        import io
-        tts = gTTS(text=texto_fala, lang="pt", tld="com.br")
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        fp.seek(0)
-        audio_data = fp.getvalue()
+        audio_data = None
         
-        # 1. Tenta enviar como nota de voz nativa (sendVoice)
+        # 1. Tenta Edge-TTS Neural Masculino (pt-BR-AntonioNeural)
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            audio_data = loop.run_until_complete(_sintetizar_edge(texto_fala))
+            loop.close()
+            logger.info("Voz sintetizada com sucesso via Edge-TTS (Antonio Neural Masculino)")
+        except Exception as e_edge:
+            logger.warning(f"Edge-TTS falhou ({e_edge}), usando fallback gTTS...")
+
+        # 2. Fallback gTTS caso Edge-TTS falhe
+        if not audio_data:
+            from gtts import gTTS
+            import io
+            tts = gTTS(text=texto_fala, lang="pt", tld="com.br")
+            fp = io.BytesIO()
+            tts.write_to_fp(fp)
+            fp.seek(0)
+            audio_data = fp.getvalue()
+
+        # Envia como nota de voz nativa no Telegram (sendVoice)
         url_voice = f"{BASE_TELEGRAM_URL}/sendVoice"
-        files_voice = {"voice": ("joca_audio.mp3", audio_data, "audio/mpeg")}
+        files_voice = {"voice": ("joca_voz.mp3", audio_data, "audio/mpeg")}
         res_v = requests.post(url_voice, data={"chat_id": chat_id}, files=files_voice, timeout=25)
         if res_v.status_code == 200 and res_v.json().get("ok"):
-            logger.info(f"Nota de voz enviada com sucesso para chat {chat_id}")
+            logger.info(f"Nota de voz masculina enviada com sucesso para chat {chat_id}")
             return True
             
-        # 2. Fallback para sendAudio caso o cliente Telegram prefira áudio padrão
+        # Fallback para sendAudio caso sendVoice seja rejeitado pelo cliente Telegram
         logger.warning(f"sendVoice retornou: {res_v.text}. Tentando sendAudio...")
         url_audio = f"{BASE_TELEGRAM_URL}/sendAudio"
         files_audio = {"audio": ("joca_audio.mp3", audio_data, "audio/mpeg")}
@@ -525,14 +549,32 @@ def test_ai():
 
 @app.route("/test_voice", methods=["GET"])
 def test_voice():
-    text = request.args.get("text", "Fala Karl! O Joca agora responde por voz e texto.")
+    text = request.args.get("text", "Fala Karl! Agora o Joca está com voz masculina executiva.")
     try:
-        from gtts import gTTS
-        import io
-        tts = gTTS(text=text, lang="pt", tld="com.br")
-        fp = io.BytesIO()
-        tts.write_to_fp(fp)
-        return jsonify({"status": "success", "audio_bytes": len(fp.getvalue()), "text": text})
+        audio_data = None
+        engine = "none"
+        try:
+            import asyncio
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            audio_data = loop.run_until_complete(_sintetizar_edge(text))
+            loop.close()
+            engine = "edge-tts: pt-BR-AntonioNeural (Voz Masculina)"
+        except Exception as e_ed:
+            from gtts import gTTS
+            import io
+            tts = gTTS(text=text, lang="pt", tld="com.br")
+            fp = io.BytesIO()
+            tts.write_to_fp(fp)
+            audio_data = fp.getvalue()
+            engine = f"gtts fallback ({e_ed})"
+
+        return jsonify({
+            "status": "success",
+            "voice_engine": engine,
+            "audio_bytes": len(audio_data) if audio_data else 0,
+            "text": text
+        })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
