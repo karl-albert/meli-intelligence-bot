@@ -250,11 +250,13 @@ def enviar_voz(chat_id, texto_fala):
 # ==============================================================================
 # 6. FORMATAÇÃO E PROCESSAMENTO DE PERGUNTAS (TEXT-TO-SQL)
 # ==============================================================================
-def formatar_resultado_python(col_names, rows, user_name, pergunta_usuario):
+def formatar_resultado_python(col_names, rows, user_name, pergunta_usuario, alerta=None):
     if not rows:
         return f"Fala {user_name}! Não encontrei registros na base oficial para a sua pergunta."
     
     linhas = [f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n"]
+    if alerta:
+        linhas.append(f"{alerta}\n")
     linhas.append(f"🔍 _\"{pergunta_usuario}\"_\n")
     
     if len(rows) == 1 and len(col_names) == 1:
@@ -311,7 +313,7 @@ def processar_pergunta(texto_msg, user_name):
     mes_recente = dt_obj.month
     ontem_str = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Mapeamento oficial de Categorias e Subcategorias do Mercado Livre
+    # Mapeamento oficial de Categorias do Mercado Livre (Nível 1 - 5 categorias macro)
     MAPA_CATEGORIAS = {
         'informatica': 'Informática', 'informática': 'Informática', 'ti': 'Informática',
         'celular': 'Celulares e Telefones', 'celulares': 'Celulares e Telefones', 'telefone': 'Celulares e Telefones', 'telefones': 'Celulares e Telefones',
@@ -320,19 +322,109 @@ def processar_pergunta(texto_msg, user_name):
         'casa': 'Casa, Móveis e Decoração', 'moveis': 'Casa, Móveis e Decoração', 'móveis': 'Casa, Móveis e Decoração', 'decoracao': 'Casa, Móveis e Decoração', 'decoração': 'Casa, Móveis e Decoração'
     }
 
+    # Mapeamento oficial de Subcategorias do Mercado Livre (Nível 2 subordinado à Categoria)
     MAPA_SUBCATEGORIAS = {
+        # Celulares e Telefones
         'smartphones': ('Celulares e Telefones', 'Smartphones'), 'smartphone': ('Celulares e Telefones', 'Smartphones'),
-        'notebooks': ('Informática', 'Notebooks'), 'notebook': ('Informática', 'Notebooks'),
-        'hardware': ('Informática', 'Hardware'),
-        'periféricos': ('Informática', 'Periféricos'), 'perifericos': ('Informática', 'Periféricos'), 'periférico': ('Informática', 'Periféricos'), 'periferico': ('Informática', 'Periféricos'),
+        'áudio mobile': ('Celulares e Telefones', 'Áudio Mobile'), 'audio mobile': ('Celulares e Telefones', 'Áudio Mobile'), 'fone de ouvido': ('Celulares e Telefones', 'Áudio Mobile'), 'fones de ouvido': ('Celulares e Telefones', 'Áudio Mobile'), 'fones': ('Celulares e Telefones', 'Áudio Mobile'), 'airpods': ('Celulares e Telefones', 'Áudio Mobile'),
+        'carregadores': ('Celulares e Telefones', 'Carregadores'), 'carregador': ('Celulares e Telefones', 'Carregadores'),
+        'smartwatches': ('Celulares e Telefones', 'Smartwatches'), 'smartwatch': ('Celulares e Telefones', 'Smartwatches'), 'relogio': ('Celulares e Telefones', 'Smartwatches'), 'relógio': ('Celulares e Telefones', 'Smartwatches'),
+        'cabos': ('Celulares e Telefones', 'Cabos'), 'cabo': ('Celulares e Telefones', 'Cabos'),
+        'adaptadores': ('Celulares e Telefones', 'Adaptadores'), 'adaptador': ('Celulares e Telefones', 'Adaptadores'),
+        'suportes': ('Celulares e Telefones', 'Suportes'), 'suporte': ('Celulares e Telefones', 'Suportes'),
+        'memória': ('Celulares e Telefones', 'Memória'), 'memoria': ('Celulares e Telefones', 'Memória'),
+
+        # Informática
+        'notebooks': ('Informática', 'Notebooks'), 'notebook': ('Informática', 'Notebooks'), 'laptop': ('Informática', 'Notebooks'), 'laptops': ('Informática', 'Notebooks'),
+        'hardware': ('Informática', 'Hardware'), 'placa de vídeo': ('Informática', 'Hardware'), 'placa de video': ('Informática', 'Hardware'), 'processador': ('Informática', 'Hardware'),
+        'periféricos': ('Informática', 'Periféricos'), 'perifericos': ('Informática', 'Periféricos'), 'periférico': ('Informática', 'Periféricos'), 'periferico': ('Informática', 'Periféricos'), 'mouse': ('Informática', 'Periféricos'), 'teclado': ('Informática', 'Periféricos'),
+        'armazenamento': ('Informática', 'Armazenamento'), 'ssd': ('Informática', 'Armazenamento'), 'hd': ('Informática', 'Armazenamento'), 'pendrive': ('Informática', 'Armazenamento'),
         'monitores': ('Informática', 'Monitores'), 'monitor': ('Informática', 'Monitores'),
-        'games': ('Informática', 'Games'),
-        'climatização': ('Eletrodomésticos', 'Climatização'), 'climatizacao': ('Eletrodomésticos', 'Climatização'), 'ar condicionado': ('Eletrodomésticos', 'Climatização'), 'ventilador': ('Eletrodomésticos', 'Climatização'),
-        'cama e banho': ('Casa, Móveis e Decoração', 'Cama e Banho'), 'lencol': ('Casa, Móveis e Decoração', 'Cama e Banho'), 'lençol': ('Casa, Móveis e Decoração', 'Cama e Banho'),
-        'manuais': ('Ferramentas e Construção', 'Manuais'),
+        'games': ('Informática', 'Games'), 'gamer': ('Informática', 'Games'), 'jogos': ('Informática', 'Games'),
+        'redes': ('Informática', 'Redes'), 'roteador': ('Informática', 'Redes'), 'roteadores': ('Informática', 'Redes'),
+        'impressão 3d': ('Informática', 'Impressão 3D'), 'impressao 3d': ('Informática', 'Impressão 3D'),
+        'energia': ('Informática', 'Energia'), 'nobreak': ('Informática', 'Energia'),
+        'áudio pc': ('Informática', 'Áudio PC'), 'audio pc': ('Informática', 'Áudio PC'),
+        'suprimentos': ('Informática', 'Suprimentos'), 'toner': ('Informática', 'Suprimentos'), 'cartucho': ('Informática', 'Suprimentos'),
+        'impressão': ('Informática', 'Impressão'), 'impressao': ('Informática', 'Impressão'), 'impressora': ('Informática', 'Impressão'),
+
+        # Eletrodomésticos
+        'climatização': ('Eletrodomésticos', 'Climatização'), 'climatizacao': ('Eletrodomésticos', 'Climatização'), 'ar condicionado': ('Eletrodomésticos', 'Climatização'), 'ventilador': ('Eletrodomésticos', 'Climatização'), 'aquecedor': ('Eletrodomésticos', 'Climatização'),
+        'purificadores': ('Eletrodomésticos', 'Purificadores'), 'purificador': ('Eletrodomésticos', 'Purificadores'),
+        'refrigeração': ('Eletrodomésticos', 'Refrigeração'), 'refrigeracao': ('Eletrodomésticos', 'Refrigeração'), 'geladeira': ('Eletrodomésticos', 'Refrigeração'), 'freezer': ('Eletrodomésticos', 'Refrigeração'),
+        'cuidados roupas': ('Eletrodomésticos', 'Cuidados Roupas'), 'ferro de passar': ('Eletrodomésticos', 'Cuidados Roupas'),
+        'eletroportáteis': ('Eletrodomésticos', 'Eletroportáteis'), 'eletroportateis': ('Eletrodomésticos', 'Eletroportáteis'), 'air fryer': ('Eletrodomésticos', 'Eletroportáteis'), 'fritadeira': ('Eletrodomésticos', 'Eletroportáteis'), 'cafeteira': ('Eletrodomésticos', 'Eletroportáteis'),
+        'bebedouros': ('Eletrodomésticos', 'Bebedouros'), 'bebedouro': ('Eletrodomésticos', 'Bebedouros'),
+
+        # Ferramentas e Construção
+        'manuais': ('Ferramentas e Construção', 'Manuais'), 'ferramentas manuais': ('Ferramentas e Construção', 'Manuais'),
         'elétrica': ('Ferramentas e Construção', 'Elétrica'), 'eletrica': ('Ferramentas e Construção', 'Elétrica'),
-        'cozinha': (None, 'Cozinha'), 'limpeza': (None, 'Limpeza'), 'lavanderia': (None, 'Lavanderia')
+        'elétricas': ('Ferramentas e Construção', 'Elétricas'), 'eletricas': ('Ferramentas e Construção', 'Elétricas'), 'furadeira': ('Ferramentas e Construção', 'Elétricas'), 'parafusadeira': ('Ferramentas e Construção', 'Elétricas'),
+        'construção': ('Ferramentas e Construção', 'Construção'), 'construcao': ('Ferramentas e Construção', 'Construção'),
+        'pintura': ('Ferramentas e Construção', 'Pintura'), 'tinta': ('Ferramentas e Construção', 'Pintura'),
+        'medição': ('Ferramentas e Construção', 'Medição'), 'medicao': ('Ferramentas e Construção', 'Medição'), 'trena': ('Ferramentas e Construção', 'Medição'),
+        'hidráulica': ('Ferramentas e Construção', 'Hidráulica'), 'hidraulica': ('Ferramentas e Construção', 'Hidráulica'),
+        'pneumática': ('Ferramentas e Construção', 'Pneumática'), 'pneumatica': ('Ferramentas e Construção', 'Pneumática'),
+        'solda': ('Ferramentas e Construção', 'Solda'),
+
+        # Casa, Móveis e Decoração
+        'cama e banho': ('Casa, Móveis e Decoração', 'Cama e Banho'), 'lencol': ('Casa, Móveis e Decoração', 'Cama e Banho'), 'lençol': ('Casa, Móveis e Decoração', 'Cama e Banho'), 'toalha': ('Casa, Móveis e Decoração', 'Cama e Banho'),
+        'móveis': ('Casa, Móveis e Decoração', 'Móveis'), 'moveis': ('Casa, Móveis e Decoração', 'Móveis'), 'sofa': ('Casa, Móveis e Decoração', 'Móveis'), 'sofá': ('Casa, Móveis e Decoração', 'Móveis'),
+        'decoração': ('Casa, Móveis e Decoração', 'Decoração'), 'decoracao': ('Casa, Móveis e Decoração', 'Decoração'),
+        'banheiro': ('Casa, Móveis e Decoração', 'Banheiro'),
+        'iluminação': ('Casa, Móveis e Decoração', 'Iluminação'), 'iluminacao': ('Casa, Móveis e Decoração', 'Iluminação'), 'luminária': ('Casa, Móveis e Decoração', 'Iluminação'),
+        'organização': ('Casa, Móveis e Decoração', 'Organização'), 'organizacao': ('Casa, Móveis e Decoração', 'Organização'),
+        'utilidades': ('Casa, Móveis e Decoração', 'Utilidades'),
+        'utensílios': ('Casa, Móveis e Decoração', 'Utensílios de Cozinha'), 'utensilios': ('Casa, Móveis e Decoração', 'Utensílios de Cozinha'),
+        'artigos de festas': ('Casa, Móveis e Decoração', 'Artigos de Festas'),
+        'jardim': ('Casa, Móveis e Decoração', 'Jardim'),
+        'malas': ('Casa, Móveis e Decoração', 'Malas'),
+
+        # Presentes em mais de uma Categoria macro
+        'cozinha': (None, 'Cozinha'),
+        'limpeza': (None, 'Limpeza'),
+        'lavanderia': (None, 'Lavanderia'),
+        'segurança': (None, 'Segurança'), 'seguranca': (None, 'Segurança'),
+        'acessórios': (None, 'Acessórios'), 'acessorios': (None, 'Acessórios')
     }
+
+    # Detecção de Confusão Categoria vs Subcategoria para Aviso Didático
+    alerta_didatico = None
+    disse_categoria = ('categoria' in t_lower or 'categorias' in t_lower) and ('subcategoria' not in t_lower and 'subcategorias' not in t_lower)
+    disse_subcategoria = ('subcategoria' in t_lower or 'subcategorias' in t_lower)
+
+    achou_sub = None
+    for k_sub, (cat_pai, sub_nome) in MAPA_SUBCATEGORIAS.items():
+        if re.search(r'\b' + re.escape(k_sub) + r'\b', t_lower):
+            achou_sub = (k_sub, cat_pai, sub_nome)
+            break
+
+    achou_cat = None
+    for k_cat, cat_nome in MAPA_CATEGORIAS.items():
+        if re.search(r'\b' + re.escape(k_cat) + r'\b', t_lower):
+            achou_cat = (k_cat, cat_nome)
+            break
+
+    # Quando o usuário pede algo como Categoria, mas o nome é de uma Subcategoria
+    if disse_categoria and achou_sub and not achou_cat:
+        k_sub, cat_pai, sub_nome = achou_sub
+        if cat_pai:
+            alerta_didatico = (
+                f"💡 *Aviso Didático:* Olha, o que você pediu como categoria (*'{sub_nome}'*) não existe como Categoria "
+                f"porque na verdade é uma **Subcategoria**! A categoria mãe dela é **'{cat_pai}'**."
+            )
+        else:
+            alerta_didatico = (
+                f"💡 *Aviso Didático:* Olha, o que você pediu como categoria (*'{sub_nome}'*) não existe como Categoria "
+                f"porque na verdade é uma **Subcategoria**."
+            )
+    # Quando o usuário pede algo como Subcategoria, mas o nome é de uma Categoria principal
+    elif disse_subcategoria and achou_cat and not achou_sub:
+        k_cat, cat_nome = achou_cat
+        alerta_didatico = (
+            f"💡 *Aviso Didático:* Olha, você pesquisou como subcategoria, mas **'{cat_nome}'** é uma **Categoria principal** "
+            f"(Nível 1), e não uma subcategoria!"
+        )
 
     # Resolução temporal precisa: YTDA, MTD, Ontem, Hoje ou Data Específica
     where_tempo = f"data = '{data_recente}'"
@@ -452,8 +544,11 @@ Você é o assistente executivo Joca do Mercado Livre. O usuário '{user_name}' 
 Dados extraídos do banco oficial referente a ({desc_tempo}):
 {tabela_str}
 
+{f"AVISO DIDÁTICO OBRIGATÓRIO A INCLUIR NA RESPOSTA:\n{alerta_didatico}\n" if alerta_didatico else ""}
+
 Formate uma resposta executiva impecável para o Telegram:
-- Saudação: "📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:"
+- Saudação obrigatória: "📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:"
+{f"- IMEDIATAMENTE após a saudação, inclua com destaque o Aviso Didático explicando que o usuário se confundiu entre Categoria e Subcategoria (use o texto do aviso acima)!\n" if alerta_didatico else ""}
 - Destaque o período consultado ({desc_tempo}).
 - Respeite rigorosamente a hierarquia: Categoria vem antes da Subcategoria!
 - Apresente os números formatados em moeda (R$) e quantidades com separadores de milhar (ex: R$ 3.818.209,99 e 11.119 pedidos).
@@ -462,11 +557,11 @@ Formate uma resposta executiva impecável para o Telegram:
 - Rodapé obrigatório: "📌 _Dados da base do ML (Power BI) · Atualizado até {data_recente}_"
 """
         resp_final = chamar_gemini(prompt_formatacao)
-        return resp_final if resp_final else formatar_resultado_python(col_names, rows, user_name, texto_msg)
+        return resp_final if resp_final else formatar_resultado_python(col_names, rows, user_name, texto_msg, alerta=alerta_didatico)
             
     except Exception as e:
         logger.error(f"Erro IA/DuckDB: {e}")
-        return formatar_resultado_python(col_names, rows, user_name, texto_msg) if ('col_names' in locals() and 'rows' in locals()) else None
+        return formatar_resultado_python(col_names, rows, user_name, texto_msg, alerta=alerta_didatico) if ('col_names' in locals() and 'rows' in locals()) else None
 
 
 # ==============================================================================
