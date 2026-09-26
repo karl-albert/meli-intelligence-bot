@@ -326,7 +326,13 @@ def processar_pergunta(texto_msg, user_name):
     MAPA_SUBCATEGORIAS = {
         # Celulares e Telefones
         'smartphones': ('Celulares e Telefones', 'Smartphones'), 'smartphone': ('Celulares e Telefones', 'Smartphones'),
-        'áudio mobile': ('Celulares e Telefones', 'Áudio Mobile'), 'audio mobile': ('Celulares e Telefones', 'Áudio Mobile'), 'fone de ouvido': ('Celulares e Telefones', 'Áudio Mobile'), 'fones de ouvido': ('Celulares e Telefones', 'Áudio Mobile'), 'fones': ('Celulares e Telefones', 'Áudio Mobile'), 'airpods': ('Celulares e Telefones', 'Áudio Mobile'),
+        'áudio mobile': ('Celulares e Telefones', 'Áudio Mobile'), 'audio mobile': ('Celulares e Telefones', 'Áudio Mobile'),
+        'automobile': ('Celulares e Telefones', 'Áudio Mobile'), 'auto mobile': ('Celulares e Telefones', 'Áudio Mobile'),
+        'audiomobile': ('Celulares e Telefones', 'Áudio Mobile'), 'som mobile': ('Celulares e Telefones', 'Áudio Mobile'),
+        'fone de ouvido': ('Celulares e Telefones', 'Áudio Mobile'), 'fones de ouvido': ('Celulares e Telefones', 'Áudio Mobile'),
+        'fones': ('Celulares e Telefones', 'Áudio Mobile'), 'fone': ('Celulares e Telefones', 'Áudio Mobile'),
+        'airpods': ('Celulares e Telefones', 'Áudio Mobile'), 'airpod': ('Celulares e Telefones', 'Áudio Mobile'),
+        'headset': ('Celulares e Telefones', 'Áudio Mobile'), 'tws': ('Celulares e Telefones', 'Áudio Mobile'),
         'carregadores': ('Celulares e Telefones', 'Carregadores'), 'carregador': ('Celulares e Telefones', 'Carregadores'),
         'smartwatches': ('Celulares e Telefones', 'Smartwatches'), 'smartwatch': ('Celulares e Telefones', 'Smartwatches'), 'relogio': ('Celulares e Telefones', 'Smartwatches'), 'relógio': ('Celulares e Telefones', 'Smartwatches'),
         'cabos': ('Celulares e Telefones', 'Cabos'), 'cabo': ('Celulares e Telefones', 'Cabos'),
@@ -388,16 +394,30 @@ def processar_pergunta(texto_msg, user_name):
         'acessórios': (None, 'Acessórios'), 'acessorios': (None, 'Acessórios')
     }
 
-    # Detecção de Confusão Categoria vs Subcategoria para Aviso Didático
-    alerta_didatico = None
-    disse_categoria = ('categoria' in t_lower or 'categorias' in t_lower) and ('subcategoria' not in t_lower and 'subcategorias' not in t_lower)
-    disse_subcategoria = ('subcategoria' in t_lower or 'subcategorias' in t_lower)
+    # Detecção com tolerância a erros de digitação e variações de fala
+    subcat_synonyms = ['subcategoria', 'subcategorias', 'subcategira', 'sub-categoria', 'sub categoria', 'subcat', 'sub-cat', 'sub-categ']
+    disse_subcategoria = any(w in t_lower for w in subcat_synonyms)
+
+    cat_synonyms = ['categoria', 'categorias', 'categora', 'cat', 'categor']
+    disse_categoria = any(w in t_lower for w in cat_synonyms) and not disse_subcategoria
 
     achou_sub = None
     for k_sub, (cat_pai, sub_nome) in MAPA_SUBCATEGORIAS.items():
         if re.search(r'\b' + re.escape(k_sub) + r'\b', t_lower):
             achou_sub = (k_sub, cat_pai, sub_nome)
             break
+
+    # Se o usuário disse subcategoria mas não achou no mapa fixo, busca dinâmica no banco DuckDB
+    if disse_subcategoria and not achou_sub:
+        m_cand = re.search(r'(?:subcategoria|subcategorias|subcategira|sub-categoria|sub categoria|subcat)\s+(?:de\s+|da\s+|do\s+)?([a-z0-9áéíóúãõç\s]+)', t_lower)
+        if m_cand:
+            termo = m_cand.group(1).strip()
+            for stop in ['no mtd', 'no ytda', 'hoje', 'ontem', 'no ano', 'no mes']:
+                termo = termo.replace(stop, '').strip()
+            if termo:
+                row_dyn = con.execute(f"SELECT DISTINCT categoria, subcategoria FROM fato_ml WHERE subcategoria ILIKE '%{termo}%' LIMIT 1").fetchone()
+                if row_dyn:
+                    achou_sub = (termo, row_dyn[0], row_dyn[1])
 
     achou_cat = None
     for k_cat, cat_nome in MAPA_CATEGORIAS.items():
@@ -460,37 +480,34 @@ def processar_pergunta(texto_msg, user_name):
 
     # Resolução Analítica Determinística (Zero alucinação, precisão 100%)
     if not clean_sql:
-        # A. Subcategoria específica mencionada
-        for k_sub, (cat_pai, sub_nome) in MAPA_SUBCATEGORIAS.items():
-            if re.search(r'\b' + re.escape(k_sub) + r'\b', t_lower):
-                if cat_pai:
-                    clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_pai}' AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria"
-                else:
-                    clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria ORDER BY faturamento DESC"
-                break
+        # A. Subcategoria específica mencionada (ou resolvida no mapa ou dinamicamente)
+        if achou_sub:
+            k_sub, cat_pai, sub_nome = achou_sub
+            if cat_pai:
+                clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_pai}' AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria"
+            else:
+                clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria ORDER BY faturamento DESC"
 
         # B. Categoria específica mencionada (SEMPRE responde a categoria solicitada, NUNCA o total)
-        if not clean_sql:
-            for k_cat, cat_nome in MAPA_CATEGORIAS.items():
-                if re.search(r'\b' + re.escape(k_cat) + r'\b', t_lower):
-                    clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_nome}' GROUP BY categoria"
-                    break
+        elif achou_cat:
+            k_cat, cat_nome = achou_cat
+            clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_nome}' GROUP BY categoria"
 
         # C. Ranking de TODAS as subcategorias
-        if not clean_sql and 'subcategoria' in t_lower and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por subcategoria']):
+        elif disse_subcategoria and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por subcategoria']):
             clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} GROUP BY categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
 
         # D. Ranking de TODAS as categorias
-        if not clean_sql and 'categoria' in t_lower and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por categoria']):
+        elif disse_categoria and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por categoria']):
             clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} GROUP BY categoria ORDER BY faturamento DESC"
 
         # E. Ranking de produtos mais vendidos
-        if not clean_sql and any(w in t_lower for w in ['produto', 'anuncio', 'anúncio', 'item', 'mais vendido', 'mais vendid']):
+        elif any(w in t_lower for w in ['produto', 'anuncio', 'anúncio', 'item', 'mais vendido', 'mais vendid']):
             clean_sql = f"SELECT '{desc_tempo}' AS periodo, titulo_produto, marca, categoria, subcategoria, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento FROM fato_ml WHERE {where_tempo} GROUP BY titulo_produto, marca, categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
 
-        # F. Total Geral do Período (apenas quando o usuário pede faturamento/vendas total SEM especificar categoria/subcategoria)
-        if not clean_sql and any(w in t_lower for w in ['total', 'geral', 'faturamento', 'faturou', 'vendas', 'vendeu', 'resultado']):
-            if not any(w in t_lower for w in ['categoria', 'subcategoria', 'produto', 'marca']):
+        # F. Total Geral do Período (BLINDAGEM TOTAL: NUNCA roda se o usuário falou categoria, subcategoria, produto, marca ou achou entidades)
+        elif any(w in t_lower for w in ['total', 'geral', 'faturamento', 'faturou', 'vendas', 'vendeu', 'resultado']):
+            if not disse_subcategoria and not disse_categoria and not achou_sub and not achou_cat and not any(w in t_lower for w in ['produto', 'anuncio', 'item', 'marca']):
                 clean_sql = f"SELECT '{desc_tempo}' AS periodo, SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_pedidos FROM fato_ml WHERE {where_tempo}"
 
     # 3. Text-to-SQL de Contingência via Gemini (para consultas livres não cobertas pelas regras acima)
@@ -590,6 +607,7 @@ def home():
 def status():
     return jsonify({
         "status": "online",
+        "versao": "2.4.0 - Motor Analitico e Didatico Resiliente",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "bot": "@Joca_Meli_bot"
