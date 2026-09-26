@@ -50,33 +50,41 @@ AVAILABLE_MODELS = [
 # Inicializar DuckDB
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PARQUET_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_MaisVendidos.parquet").replace("\\", "/")
-
-logger.info(f"Carregando {PARQUET_FILE} no DuckDB...")
 con = duckdb.connect()
-con.execute(f"""
-    CREATE TABLE fato_ml AS 
-    SELECT 
-        data, 
-        ano, 
-        mes, 
-        ano_mes,
-        posicao_ranking,
-        categoria, 
-        subcategoria, 
-        titulo_produto, 
-        marca, 
-        TRY_CAST(qtd_vendas_estimadas_dia AS INT) as qtd_vendas_num, 
-        TRY_CAST(REPLACE(REPLACE(faturamento_estimado_dia, '.', ''), ',', '.') AS DOUBLE) as fat_num, 
-        TRY_CAST(REPLACE(REPLACE(preco_atual, '.', ''), ',', '.') AS DOUBLE) as preco_num, 
-        is_full, 
-        frete_gratis 
-    FROM '{PARQUET_FILE}'
-""")
 
-data_recente = con.execute("SELECT MAX(data) FROM fato_ml").fetchone()[0]
-total_registros = con.execute("SELECT COUNT(*) FROM fato_ml").fetchone()[0]
-data_inicio = con.execute("SELECT MIN(data) FROM fato_ml").fetchone()[0]
-logger.info(f"[OK] Base DuckDB pronta: {total_registros:,} registros. Período: {data_inicio} até {data_recente}")
+data_recente = None
+total_registros = 0
+data_inicio = None
+
+def recarregar_duckdb():
+    global con, data_recente, total_registros, data_inicio
+    logger.info(f"Carregando {PARQUET_FILE} no DuckDB...")
+    con.execute("DROP TABLE IF EXISTS fato_ml")
+    con.execute(f"""
+        CREATE TABLE fato_ml AS 
+        SELECT 
+            data, 
+            ano, 
+            mes, 
+            ano_mes,
+            posicao_ranking,
+            categoria, 
+            subcategoria, 
+            titulo_produto, 
+            marca, 
+            TRY_CAST(qtd_vendas_estimadas_dia AS INT) as qtd_vendas_num, 
+            TRY_CAST(REPLACE(REPLACE(faturamento_estimado_dia, '.', ''), ',', '.') AS DOUBLE) as fat_num, 
+            TRY_CAST(REPLACE(REPLACE(preco_atual, '.', ''), ',', '.') AS DOUBLE) as preco_num, 
+            is_full, 
+            frete_gratis 
+        FROM '{PARQUET_FILE}'
+    """)
+    data_recente = con.execute("SELECT MAX(data) FROM fato_ml").fetchone()[0]
+    total_registros = con.execute("SELECT COUNT(*) FROM fato_ml").fetchone()[0]
+    data_inicio = con.execute("SELECT MIN(data) FROM fato_ml").fetchone()[0]
+    logger.info(f"[OK] Base DuckDB pronta: {total_registros:,} registros. Período: {data_inicio} até {data_recente}")
+
+recarregar_duckdb()
 
 def chamar_gemini(prompt):
     for model_name in AVAILABLE_MODELS:
@@ -571,6 +579,57 @@ def test_voice():
         })
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
+
+SYNC_SECRET = os.environ.get("SYNC_SECRET", "meli_joca_sync_2026_karl")
+
+@app.route("/sync_data", methods=["GET", "POST"])
+def sync_data():
+    """
+    Recebe atualizacao direta do arquivo Parquet sem precisar reconstruir o container no Render.
+    Aceita arquivo enviado via POST multipart/form-data com o campo 'file',
+    validado pela chave secreta via query string (?secret=...) ou header (X-Sync-Secret).
+    """
+    token_recebido = request.args.get("secret") or request.headers.get("X-Sync-Secret")
+    if token_recebido != SYNC_SECRET:
+        return jsonify({"status": "error", "message": "Chave de sincronizacao invalida."}), 403
+
+    if request.method == "GET":
+        return jsonify({
+            "status": "ready",
+            "message": "Endpoint de sincronizacao pronto. Envie um POST com o arquivo Parquet.",
+            "data_recente": str(data_recente),
+            "data_inicio": str(data_inicio),
+            "total_registros": total_registros
+        })
+
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "Nenhum arquivo enviado no campo 'file'."}), 400
+
+    arquivo = request.files["file"]
+    if arquivo.filename == "":
+        return jsonify({"status": "error", "message": "Nome de arquivo vazio."}), 400
+
+    try:
+        # Salva o novo arquivo sobrescrevendo PARQUET_FILE
+        arquivo.save(PARQUET_FILE)
+        tamanho_mb = os.path.getsize(PARQUET_FILE) / (1024 * 1024)
+        
+        # Recarrega tabela em memoria no DuckDB instantaneamente
+        recarregar_duckdb()
+        
+        logger.info(f"Sincronizacao concluida com sucesso! {total_registros:,} registros carregados. Data mais recente: {data_recente}")
+        
+        return jsonify({
+            "status": "success",
+            "message": "Base de dados do Joca atualizada com sucesso no DuckDB!",
+            "tamanho_mb": round(tamanho_mb, 2),
+            "total_registros": total_registros,
+            "data_inicio": str(data_inicio),
+            "data_recente": str(data_recente)
+        }), 200
+    except Exception as e:
+        logger.error(f"Erro ao processar sincronizacao: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
