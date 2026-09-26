@@ -233,7 +233,7 @@ def formatar_resultado_python(col_names, rows, user_name, pergunta_usuario):
     if not rows:
         return f"Fala {user_name}! Não encontrei registros na base oficial para a sua pergunta."
     
-    linhas = [f"📊 *Fala {user_name}! Segue o resultado da consulta:*\n"]
+    linhas = [f"📊 *Olá {user_name}! Pesquisei aqui vejamos  o resultado:*\n"]
     linhas.append(f"🔍 _\"{pergunta_usuario}\"_\n")
     
     if len(rows) == 1 and len(col_names) == 1:
@@ -286,7 +286,7 @@ def formatar_resultado_python(col_names, rows, user_name, pergunta_usuario):
         if len(rows) > 8:
             linhas.append(f"\n_... e mais {len(rows) - 8} registros encontrados._")
 
-    linhas.append(f"\n📌 _Dados oficiais da base do Mercado Livre (Power BI) · Atualizado até {data_recente}_")
+    linhas.append(f"\n📌 _Dados da base do ML (Power BI) · Atualizado até {data_recente}_")
     return "\n".join(linhas)
 
 def processar_pergunta(texto_msg, user_name):
@@ -295,7 +295,7 @@ def processar_pergunta(texto_msg, user_name):
     # 1. Comandos de Saudação
     if t_lower in ['/start', '/ajuda', 'oi', 'ola', 'olá', 'start']:
         return (
-            f"👋 *Fala {user_name}! Eu sou o Meli Intelligence Bot (Render 24/7).*\n\n"
+            f"👋 *Olá {user_name}! Eu sou o Meli Intelligence Bot (Render 24/7).*\n\n"
             f"Estou com a IA do **Google Gemini** integrada à base oficial de Mais Vendidos do Mercado Livre.\n"
             f"📅 *Base atualizada até:* `{data_recente}` ({total_registros:,} registros sincronizados).\n\n"
             f"🎙️ *Modo Voz Ativo:* Você pode mandar **mensagem de voz / áudio** no Telegram que eu compreendo perfeitamente e te respondo falando!\n\n"
