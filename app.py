@@ -183,13 +183,10 @@ def enviar_voz(chat_id, texto_fala):
         # 1. Tenta Edge-TTS Neural Masculino (pt-BR-AntonioNeural)
         try:
             import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            audio_data = loop.run_until_complete(_sintetizar_edge(texto_fala))
-            loop.close()
+            audio_data = asyncio.run(_sintetizar_edge(texto_fala))
             logger.info("Voz sintetizada com sucesso via Edge-TTS (Antonio Neural Masculino)")
         except Exception as e_edge:
-            logger.warning(f"Edge-TTS falhou ({e_edge}), usando fallback gTTS...")
+            logger.error(f"FALHA NO EDGE-TTS: {e_edge}. Usando fallback gTTS...")
 
         # 2. Fallback gTTS caso Edge-TTS falhe
         if not audio_data:
@@ -555,10 +552,7 @@ def test_voice():
         engine = "none"
         try:
             import asyncio
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            audio_data = loop.run_until_complete(_sintetizar_edge(text))
-            loop.close()
+            audio_data = asyncio.run(_sintetizar_edge(text))
             engine = "edge-tts: pt-BR-AntonioNeural (Voz Masculina)"
         except Exception as e_ed:
             from gtts import gTTS
