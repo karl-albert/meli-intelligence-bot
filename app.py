@@ -49,10 +49,11 @@ BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN}"
 # Configurar Google Gemini
 genai.configure(api_key=GEMINI_KEY)
 AVAILABLE_MODELS = [
-    "gemini-3.1-flash-lite",
     "gemini-3.8-flash",
+    "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
-    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "gemini-1.5-flash",
     "gemini-flash-latest"
 ]
 
@@ -304,7 +305,7 @@ def processar_pergunta(texto_msg, user_name):
             f"📌 _Hoje a base já está atualizada com dados em tempo real até {data_recente}!_"
         )
 
-    # 2. Detecção Inteligente de Datas e Atalhos SQL
+    # 2. Detecção Inteligente de Datas e Atalhos Estritos
     clean_sql = None
     data_alvo = None
     m_iso = re.search(r'\b(202[5-9])-(\d{2})-(\d{2})\b', t_lower)
@@ -324,22 +325,20 @@ def processar_pergunta(texto_msg, user_name):
     elif any(w in t_lower for w in ["hoje", "atual", "recente", "último dia", "ultimo dia", "dia mais recente"]):
         data_alvo = str(data_recente)
 
+    # Identifica se a pergunta exige análise dimensional detalhada (NÃO deve cair em atalho simples)
+    tem_dimensao = any(w in t_lower for w in [
+        "categoria", "subcategoria", "produto", "anúncio", "anuncio", "marca", "top", "ranking", 
+        "melhor", "pior", "qual", "quais", "quem", "por", "em ", "de ", "ticket", "full", "frete",
+        "smart", "celular", "notebook", "inform", "eletro", "ferramenta", "casa", "apple", "samsung"
+    ])
+
     if "data" in t_lower and ("recente" in t_lower or "ultima" in t_lower or "atualizada" in t_lower or "base" in t_lower) and not (m_iso or m_br):
         clean_sql = f"SELECT '{data_recente}' AS data_mais_recente, COUNT(*) AS total_registros FROM fato_ml"
-    elif data_alvo and any(w in t_lower for w in ["venda", "fatur", "quanto", "número", "numero", "resultado", "pedidos", "volume"]):
+    elif data_alvo and not tem_dimensao and any(w in t_lower for w in ["faturamento", "vendas", "resultado", "total"]):
         d_br = f"{data_alvo[8:10]}/{data_alvo[5:7]}/{data_alvo[:4]}"
-        if "apple" in t_lower:
-            clean_sql = f"SELECT '{d_br}' AS data_referencia, SUM(qtd_vendas_num) AS vendas_apple, SUM(fat_num) AS faturamento_apple FROM fato_ml WHERE data = '{data_alvo}' AND marca ILIKE '%Apple%'"
-        elif "samsung" in t_lower:
-            clean_sql = f"SELECT '{d_br}' AS data_referencia, SUM(qtd_vendas_num) AS vendas_samsung, SUM(fat_num) AS faturamento_samsung FROM fato_ml WHERE data = '{data_alvo}' AND marca ILIKE '%Samsung%'"
-        else:
-            clean_sql = f"SELECT '{d_br}' AS data_referencia, SUM(qtd_vendas_num) AS total_vendas, SUM(fat_num) AS faturamento_total FROM fato_ml WHERE data = '{data_alvo}'"
-    elif "faturamento total" in t_lower and not data_alvo:
-        clean_sql = "SELECT SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_vendas FROM fato_ml"
-    elif "vendas total" in t_lower and not data_alvo:
-        clean_sql = "SELECT SUM(qtd_vendas_num) AS total_vendas, SUM(fat_num) AS faturamento_total FROM fato_ml"
+        clean_sql = f"SELECT '{d_br}' AS data_referencia, SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_pedidos FROM fato_ml WHERE data = '{data_alvo}'"
 
-    # 3. Text-to-SQL via Gemini + Execução no DuckDB
+    # 3. Text-to-SQL Especialista com Hierarquia Estrita (Categoria > Subcategoria > Produto)
     try:
         dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
         ano_atual, mes_atual = dt_obj.year, dt_obj.month
@@ -348,11 +347,56 @@ def processar_pergunta(texto_msg, user_name):
         ano_atual, mes_atual, ontem_str = 2026, 9, "2026-09-25"
 
     prompt_sql = f"""
-Você é o motor analítico SQL DuckDB do Mercado Livre Brasil. Tabela: 'fato_ml'.
-Schema: data (DATE), ano (INT), mes (INT), categoria (VARCHAR), subcategoria (VARCHAR), titulo_produto (VARCHAR), marca (VARCHAR), qtd_vendas_num (INT), fat_num (DOUBLE), preco_num (DOUBLE), is_full (BOOLEAN), frete_gratis (BOOLEAN).
-Data mais recente: '{data_recente}'. MTD: ano = {ano_atual} AND mes = {mes_atual} AND data <= '{data_recente}'. Ontem: '{ontem_str}'.
-Pergunta: "{texto_msg}"
-Retorne APENAS a query SQL SELECT DuckDB dentro de ```sql ... ``` ou 'NAO_SQL'.
+Você é o motor analítico SQL DuckDB especialista do Mercado Livre Brasil.
+Tabela disponível: 'fato_ml'
+Data mais recente disponível na base: '{data_recente}'
+Ontem: '{ontem_str}' | Mês atual (MTD): ano = {ano_atual} AND mes = {mes_atual} AND data <= '{data_recente}'
+
+ESTRUTURA HIERÁRQUICA OFICIAL (A CATEGORIA VEM ANTES DA SUBCATEGORIA):
+1. NÍVEL 1 - CATEGORIA (Exatamente 5 categorias macro oficiais):
+   - 'Celulares e Telefones'
+   - 'Informática'
+   - 'Eletrodomésticos'
+   - 'Ferramentas e Construção'
+   - 'Casa, Móveis e Decoração'
+
+2. NÍVEL 2 - SUBCATEGORIA (Sempre subordinada à Categoria):
+   - Em 'Celulares e Telefones': 'Smartphones', 'Áudio Mobile', 'Carregadores', 'Acessórios', 'Smartwatches', 'Cabos', 'Suportes', 'Memória'
+   - Em 'Informática': 'Notebooks', 'Hardware', 'Periféricos', 'Armazenamento', 'Redes', 'Games', 'Monitores', 'Suprimentos', 'Energia'
+   - Em 'Eletrodomésticos': 'Cozinha', 'Climatização', 'Limpeza', 'Purificadores', 'Lavanderia', 'Refrigeração', 'Cuidados Roupas', 'Eletroportáteis', 'Bebedouros'
+   - Em 'Ferramentas e Construção': 'Manuais', 'Elétrica', 'Elétricas', 'Construção', 'Pintura', 'Acessórios', 'Medição', 'Solda', 'Hidráulica', 'Pneumática'
+   - Em 'Casa, Móveis e Decoração': 'Cama e Banho', 'Móveis', 'Cozinha', 'Decoração', 'Banheiro', 'Organização', 'Iluminação', 'Lavanderia', 'Utilidades'
+
+3. NÍVEL 3 - PRODUTO E MARCA:
+   - 'titulo_produto' (Nome completo do anúncio)
+   - 'marca' (ex: Apple, Samsung, Mondial, Tramontina, Xiaomi, Motorola, etc.)
+
+COLUNAS DA TABELA 'fato_ml':
+- data (DATE)
+- ano (BIGINT), mes (BIGINT), ano_mes (VARCHAR 'YYYY-MM')
+- posicao_ranking (BIGINT de 1 a 50)
+- categoria (VARCHAR)
+- subcategoria (VARCHAR)
+- titulo_produto (VARCHAR)
+- marca (VARCHAR)
+- qtd_vendas_num (BIGINT - quantidade de pedidos / volume vendido)
+- fat_num (DOUBLE - faturamento em R$)
+- preco_num (DOUBLE - preço do anúncio em R$)
+- is_full (BIGINT - 1 para envio FULL, 0 para normal)
+- frete_gratis (BIGINT - 1 para frete grátis, 0 para pago)
+
+DIRETRIZES DE QUERY DUCKDB:
+- 'hoje', 'recente', 'atualmente', 'último dia' -> WHERE data = '{data_recente}'
+- Se a pergunta for sobre 'categoria': SEMPRE faça SELECT categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE ... GROUP BY categoria ORDER BY faturamento DESC
+- Se a pergunta for sobre 'subcategoria': SEMPRE traga a categoria antes: SELECT categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE ... GROUP BY categoria, subcategoria ORDER BY faturamento DESC
+- Se a pergunta citar Smartphones, celulares ou telefones: use categoria = 'Celulares e Telefones' (e subcategoria = 'Smartphones' se aplicável)
+- Se a pergunta citar notebooks, pcs, ti, hardware: use categoria = 'Informática'
+- Para busca de marcas ou palavras: use ILIKE '%termo%' (ex: marca ILIKE '%Apple%')
+- Para produtos mais vendidos: SELECT titulo_produto, marca, categoria, subcategoria, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento FROM fato_ml WHERE ... GROUP BY titulo_produto, marca, categoria, subcategoria ORDER BY faturamento DESC LIMIT 5
+- NUNCA invente colunas. Use fat_num e qtd_vendas_num.
+
+Pergunta do usuário: "{texto_msg}"
+Retorne EXCLUSIVAMENTE a query SQL DuckDB dentro de ```sql ... ``` ou 'NAO_SQL'.
 """
     try:
         if not clean_sql:
@@ -367,21 +411,24 @@ Retorne APENAS a query SQL SELECT DuckDB dentro de ```sql ... ``` ou 'NAO_SQL'.
         rows = cur.fetchall()
         
         if not rows:
-            return f"Fala {user_name}! Não foram encontrados registros na base para sua pesquisa."
+            return f"📊 Olá {user_name}! Pesquisei aqui na base oficial do Mercado Livre mas não encontrei registros para essa pesquisa específica."
 
         header_str = " | ".join(col_names)
         linhas_tab = [" | ".join([str(v) if v is not None else "NULL" for v in r]) for r in rows[:15]]
         tabela_str = f"{header_str}\n" + ("-" * len(header_str)) + "\n" + "\n".join(linhas_tab)
 
         prompt_formatacao = f"""
-Você é o assistente executivo 'Meli Intelligence Bot'. O usuário '{user_name}' perguntou: "{texto_msg}"
-Resultado obtido no banco oficial:
+Você é o assistente executivo Joca do Mercado Livre. O usuário '{user_name}' perguntou: "{texto_msg}"
+Dados extraídos do banco oficial:
 {tabela_str}
 
-Formate a resposta para o Telegram:
+Formate uma resposta executiva impecável para o Telegram:
 - Saudação: "📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:"
-- Emojis comerciais e formatação em R$ ou quantidade.
-- Rodapé: "📌 _Dados da base do ML (Power BI) · Atualizado até {data_recente}_"
+- Respeite rigorosamente a hierarquia de negócio: a Categoria vem sempre antes da Subcategoria!
+- Apresente os números formatados em moeda (R$) e quantidades com separadores de milhar (ex: R$ 3.818.209,99 e 11.119 pedidos).
+- Use tópicos claros, negrito e emojis comerciais nos pontos-chave.
+- Se houver lista de itens ou categorias, numere com clareza.
+- Rodapé obrigatório: "📌 _Dados da base do ML (Power BI) · Atualizado até {data_recente}_"
 """
         resp_final = chamar_gemini(prompt_formatacao)
         return resp_final if resp_final else formatar_resultado_python(col_names, rows, user_name, texto_msg)
