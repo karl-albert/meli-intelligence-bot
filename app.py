@@ -49,12 +49,12 @@ BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN}"
 # Configurar Google Gemini
 genai.configure(api_key=GEMINI_KEY)
 AVAILABLE_MODELS = [
-    "gemini-3.8-flash",
     "gemini-3.1-flash-lite",
     "gemini-3.5-flash-lite",
-    "gemini-2.0-flash",
-    "gemini-1.5-flash",
-    "gemini-flash-latest"
+    "gemini-flash-lite-latest",
+    "gemini-2.5-flash-lite",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash"
 ]
 
 SYNC_SECRET = os.environ.get("SYNC_SECRET", "meli_joca_sync_2026_karl")
@@ -305,105 +305,135 @@ def processar_pergunta(texto_msg, user_name):
             f"📌 _Hoje a base já está atualizada com dados em tempo real até {data_recente}!_"
         )
 
-    # 2. Detecção Inteligente de Datas e Atalhos Estritos
+    # 2. Motor de Inteligência Analítica e Dicionário de Negócio
+    dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
+    ano_recente = dt_obj.year
+    mes_recente = dt_obj.month
+    ontem_str = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
+
+    # Mapeamento oficial de Categorias e Subcategorias do Mercado Livre
+    MAPA_CATEGORIAS = {
+        'informatica': 'Informática', 'informática': 'Informática', 'ti': 'Informática',
+        'celular': 'Celulares e Telefones', 'celulares': 'Celulares e Telefones', 'telefone': 'Celulares e Telefones', 'telefones': 'Celulares e Telefones',
+        'eletro': 'Eletrodomésticos', 'eletros': 'Eletrodomésticos', 'eletrodoméstico': 'Eletrodomésticos', 'eletrodomésticos': 'Eletrodomésticos', 'eletrodomestico': 'Eletrodomésticos', 'eletrodomesticos': 'Eletrodomésticos',
+        'ferramenta': 'Ferramentas e Construção', 'ferramentas': 'Ferramentas e Construção', 'construcao': 'Ferramentas e Construção', 'construção': 'Ferramentas e Construção',
+        'casa': 'Casa, Móveis e Decoração', 'moveis': 'Casa, Móveis e Decoração', 'móveis': 'Casa, Móveis e Decoração', 'decoracao': 'Casa, Móveis e Decoração', 'decoração': 'Casa, Móveis e Decoração'
+    }
+
+    MAPA_SUBCATEGORIAS = {
+        'smartphones': ('Celulares e Telefones', 'Smartphones'), 'smartphone': ('Celulares e Telefones', 'Smartphones'),
+        'notebooks': ('Informática', 'Notebooks'), 'notebook': ('Informática', 'Notebooks'),
+        'hardware': ('Informática', 'Hardware'),
+        'periféricos': ('Informática', 'Periféricos'), 'perifericos': ('Informática', 'Periféricos'), 'periférico': ('Informática', 'Periféricos'), 'periferico': ('Informática', 'Periféricos'),
+        'monitores': ('Informática', 'Monitores'), 'monitor': ('Informática', 'Monitores'),
+        'games': ('Informática', 'Games'),
+        'climatização': ('Eletrodomésticos', 'Climatização'), 'climatizacao': ('Eletrodomésticos', 'Climatização'), 'ar condicionado': ('Eletrodomésticos', 'Climatização'), 'ventilador': ('Eletrodomésticos', 'Climatização'),
+        'cama e banho': ('Casa, Móveis e Decoração', 'Cama e Banho'), 'lencol': ('Casa, Móveis e Decoração', 'Cama e Banho'), 'lençol': ('Casa, Móveis e Decoração', 'Cama e Banho'),
+        'manuais': ('Ferramentas e Construção', 'Manuais'),
+        'elétrica': ('Ferramentas e Construção', 'Elétrica'), 'eletrica': ('Ferramentas e Construção', 'Elétrica'),
+        'cozinha': (None, 'Cozinha'), 'limpeza': (None, 'Limpeza'), 'lavanderia': (None, 'Lavanderia')
+    }
+
+    # Resolução temporal precisa: YTDA, MTD, Ontem, Hoje ou Data Específica
+    where_tempo = f"data = '{data_recente}'"
+    desc_tempo = f"Hoje ({data_recente})"
+
+    if any(k in t_lower for k in ['ytda', 'ytd', 'acumulado no ano', 'acumulado do ano', 'no ano', 'deste ano', 'ano atual']):
+        where_tempo = f"ano = {ano_recente} AND data <= '{data_recente}'"
+        desc_tempo = f"YTDA {ano_recente} (Acumulado no Ano até {data_recente})"
+    elif any(k in t_lower for k in ['mtd', 'acumulado no mês', 'acumulado no mes', 'acumulado do mês', 'acumulado do mes', 'no mês', 'no mes', 'deste mês', 'deste mes', 'mês atual', 'mes atual']):
+        where_tempo = f"ano = {ano_recente} AND mes = {mes_recente} AND data <= '{data_recente}'"
+        desc_tempo = f"MTD (Acumulado no Mês {mes_recente:02d}/{ano_recente} até {data_recente})"
+    elif 'ontem' in t_lower:
+        where_tempo = f"data = '{ontem_str}'"
+        desc_tempo = f"Ontem ({ontem_str})"
+    else:
+        m_iso = re.search(r'\b(202[5-9])-(\d{2})-(\d{2})\b', t_lower)
+        m_br = re.search(r'\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](202[5-9]))?\b', t_lower)
+        if m_iso:
+            d_alvo = m_iso.group(0)
+            where_tempo = f"data = '{d_alvo}'"
+            desc_tempo = f"Data {d_alvo}"
+        elif m_br:
+            d, m, y = m_br.groups()
+            d_alvo = f"{y if y else ano_recente}-{int(m):02d}-{int(d):02d}"
+            where_tempo = f"data = '{d_alvo}'"
+            desc_tempo = f"Data {int(d):02d}/{int(m):02d}/{y if y else ano_recente}"
+
     clean_sql = None
-    data_alvo = None
-    m_iso = re.search(r'\b(202[5-9])-(\d{2})-(\d{2})\b', t_lower)
-    m_br = re.search(r'\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](202[5-9]))?\b', t_lower)
-    
-    if m_iso:
-        data_alvo = m_iso.group(0)
-    elif m_br:
-        d, m, y = m_br.groups()
-        data_alvo = f"{y if y else '2026'}-{int(m):02d}-{int(d):02d}"
-    elif "ontem" in t_lower:
-        try:
-            dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
-            data_alvo = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
-        except Exception:
-            data_alvo = "2026-09-25"
-    elif any(w in t_lower for w in ["hoje", "atual", "recente", "último dia", "ultimo dia", "dia mais recente"]):
-        data_alvo = str(data_recente)
 
-    # Identifica se a pergunta exige análise dimensional detalhada (NÃO deve cair em atalho simples)
-    tem_dimensao = any(w in t_lower for w in [
-        "categoria", "subcategoria", "produto", "anúncio", "anuncio", "marca", "top", "ranking", 
-        "melhor", "pior", "qual", "quais", "quem", "por", "em ", "de ", "ticket", "full", "frete",
-        "smart", "celular", "notebook", "inform", "eletro", "ferramenta", "casa", "apple", "samsung"
-    ])
-
-    if "data" in t_lower and ("recente" in t_lower or "ultima" in t_lower or "atualizada" in t_lower or "base" in t_lower) and not (m_iso or m_br):
+    # Consulta de metadados da base
+    if "data" in t_lower and any(w in t_lower for w in ["recente", "ultima", "última", "atualizada", "base"]) and not any(w in t_lower for w in ["venda", "fatur", "quanto", "categoria", "ytda", "mtd"]):
         clean_sql = f"SELECT '{data_recente}' AS data_mais_recente, COUNT(*) AS total_registros FROM fato_ml"
-    elif data_alvo and not tem_dimensao and any(w in t_lower for w in ["faturamento", "vendas", "resultado", "total"]):
-        d_br = f"{data_alvo[8:10]}/{data_alvo[5:7]}/{data_alvo[:4]}"
-        clean_sql = f"SELECT '{d_br}' AS data_referencia, SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_pedidos FROM fato_ml WHERE data = '{data_alvo}'"
 
-    # 3. Text-to-SQL Especialista com Hierarquia Estrita (Categoria > Subcategoria > Produto)
-    try:
-        dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
-        ano_atual, mes_atual = dt_obj.year, dt_obj.month
-        ontem_str = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
-    except Exception:
-        ano_atual, mes_atual, ontem_str = 2026, 9, "2026-09-25"
+    # Resolução Analítica Determinística (Zero alucinação, precisão 100%)
+    if not clean_sql:
+        # A. Subcategoria específica mencionada
+        for k_sub, (cat_pai, sub_nome) in MAPA_SUBCATEGORIAS.items():
+            if re.search(r'\b' + re.escape(k_sub) + r'\b', t_lower):
+                if cat_pai:
+                    clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_pai}' AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria"
+                else:
+                    clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria ORDER BY faturamento DESC"
+                break
 
-    prompt_sql = f"""
+        # B. Categoria específica mencionada (SEMPRE responde a categoria solicitada, NUNCA o total)
+        if not clean_sql:
+            for k_cat, cat_nome in MAPA_CATEGORIAS.items():
+                if re.search(r'\b' + re.escape(k_cat) + r'\b', t_lower):
+                    clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_nome}' GROUP BY categoria"
+                    break
+
+        # C. Ranking de TODAS as subcategorias
+        if not clean_sql and 'subcategoria' in t_lower and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por subcategoria']):
+            clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} GROUP BY categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
+
+        # D. Ranking de TODAS as categorias
+        if not clean_sql and 'categoria' in t_lower and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por categoria']):
+            clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} GROUP BY categoria ORDER BY faturamento DESC"
+
+        # E. Ranking de produtos mais vendidos
+        if not clean_sql and any(w in t_lower for w in ['produto', 'anuncio', 'anúncio', 'item', 'mais vendido', 'mais vendid']):
+            clean_sql = f"SELECT '{desc_tempo}' AS periodo, titulo_produto, marca, categoria, subcategoria, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento FROM fato_ml WHERE {where_tempo} GROUP BY titulo_produto, marca, categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
+
+        # F. Total Geral do Período (apenas quando o usuário pede faturamento/vendas total SEM especificar categoria/subcategoria)
+        if not clean_sql and any(w in t_lower for w in ['total', 'geral', 'faturamento', 'faturou', 'vendas', 'vendeu', 'resultado']):
+            if not any(w in t_lower for w in ['categoria', 'subcategoria', 'produto', 'marca']):
+                clean_sql = f"SELECT '{desc_tempo}' AS periodo, SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_pedidos FROM fato_ml WHERE {where_tempo}"
+
+    # 3. Text-to-SQL de Contingência via Gemini (para consultas livres não cobertas pelas regras acima)
+    if not clean_sql:
+        prompt_sql = f"""
 Você é o motor analítico SQL DuckDB especialista do Mercado Livre Brasil.
-Tabela disponível: 'fato_ml'
-Data mais recente disponível na base: '{data_recente}'
-Ontem: '{ontem_str}' | Mês atual (MTD): ano = {ano_atual} AND mes = {mes_atual} AND data <= '{data_recente}'
+Tabela: 'fato_ml' | Período solicitado: {desc_tempo} (filtro: {where_tempo})
 
-ESTRUTURA HIERÁRQUICA OFICIAL (A CATEGORIA VEM ANTES DA SUBCATEGORIA):
-1. NÍVEL 1 - CATEGORIA (Exatamente 5 categorias macro oficiais):
-   - 'Celulares e Telefones'
-   - 'Informática'
-   - 'Eletrodomésticos'
-   - 'Ferramentas e Construção'
-   - 'Casa, Móveis e Decoração'
+REGRAS DE TEMPO CRUCIAIS:
+- YTDA / YTD: Acumulado no ano -> ano = {ano_recente} AND data <= '{data_recente}'
+- MTD: Acumulado no mês -> ano = {ano_recente} AND mes = {mes_recente} AND data <= '{data_recente}'
+- Ontem: data = '{ontem_str}'
+- Hoje / Atual: data = '{data_recente}'
 
-2. NÍVEL 2 - SUBCATEGORIA (Sempre subordinada à Categoria):
-   - Em 'Celulares e Telefones': 'Smartphones', 'Áudio Mobile', 'Carregadores', 'Acessórios', 'Smartwatches', 'Cabos', 'Suportes', 'Memória'
-   - Em 'Informática': 'Notebooks', 'Hardware', 'Periféricos', 'Armazenamento', 'Redes', 'Games', 'Monitores', 'Suprimentos', 'Energia'
-   - Em 'Eletrodomésticos': 'Cozinha', 'Climatização', 'Limpeza', 'Purificadores', 'Lavanderia', 'Refrigeração', 'Cuidados Roupas', 'Eletroportáteis', 'Bebedouros'
-   - Em 'Ferramentas e Construção': 'Manuais', 'Elétrica', 'Elétricas', 'Construção', 'Pintura', 'Acessórios', 'Medição', 'Solda', 'Hidráulica', 'Pneumática'
-   - Em 'Casa, Móveis e Decoração': 'Cama e Banho', 'Móveis', 'Cozinha', 'Decoração', 'Banheiro', 'Organização', 'Iluminação', 'Lavanderia', 'Utilidades'
+HIERARQUIA OFICIAL (CATEGORIA VEM ANTES DA SUBCATEGORIA):
+1. Categorias: 'Celulares e Telefones', 'Informática', 'Eletrodomésticos', 'Ferramentas e Construção', 'Casa, Móveis e Decoração'.
+2. Subcategorias: 'Smartphones', 'Notebooks', 'Hardware', 'Periféricos', 'Cozinha', 'Climatização', 'Manuais', 'Elétrica', 'Cama e Banho', 'Móveis'.
+3. Produtos e Marcas: 'titulo_produto', 'marca'.
+4. Métricas: fat_num (faturamento R$), qtd_vendas_num (pedidos).
 
-3. NÍVEL 3 - PRODUTO E MARCA:
-   - 'titulo_produto' (Nome completo do anúncio)
-   - 'marca' (ex: Apple, Samsung, Mondial, Tramontina, Xiaomi, Motorola, etc.)
-
-COLUNAS DA TABELA 'fato_ml':
-- data (DATE)
-- ano (BIGINT), mes (BIGINT), ano_mes (VARCHAR 'YYYY-MM')
-- posicao_ranking (BIGINT de 1 a 50)
-- categoria (VARCHAR)
-- subcategoria (VARCHAR)
-- titulo_produto (VARCHAR)
-- marca (VARCHAR)
-- qtd_vendas_num (BIGINT - quantidade de pedidos / volume vendido)
-- fat_num (DOUBLE - faturamento em R$)
-- preco_num (DOUBLE - preço do anúncio em R$)
-- is_full (BIGINT - 1 para envio FULL, 0 para normal)
-- frete_gratis (BIGINT - 1 para frete grátis, 0 para pago)
-
-DIRETRIZES DE QUERY DUCKDB:
-- 'hoje', 'recente', 'atualmente', 'último dia' -> WHERE data = '{data_recente}'
-- Se a pergunta for sobre 'categoria': SEMPRE faça SELECT categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE ... GROUP BY categoria ORDER BY faturamento DESC
-- Se a pergunta for sobre 'subcategoria': SEMPRE traga a categoria antes: SELECT categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE ... GROUP BY categoria, subcategoria ORDER BY faturamento DESC
-- Se a pergunta citar Smartphones, celulares ou telefones: use categoria = 'Celulares e Telefones' (e subcategoria = 'Smartphones' se aplicável)
-- Se a pergunta citar notebooks, pcs, ti, hardware: use categoria = 'Informática'
-- Para busca de marcas ou palavras: use ILIKE '%termo%' (ex: marca ILIKE '%Apple%')
-- Para produtos mais vendidos: SELECT titulo_produto, marca, categoria, subcategoria, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento FROM fato_ml WHERE ... GROUP BY titulo_produto, marca, categoria, subcategoria ORDER BY faturamento DESC LIMIT 5
-- NUNCA invente colunas. Use fat_num e qtd_vendas_num.
+REGRA FUNDAMENTAL:
+- Se perguntar sobre uma CATEGORIA, filtre por 'categoria' e NUNCA retorne o total geral!
+- Se perguntar sobre uma SUBCATEGORIA, filtre por 'subcategoria' e traga a Categoria associada!
+- Se perguntar YTDA, use ano = {ano_recente} AND data <= '{data_recente}' e NUNCA o dia atual isolado!
 
 Pergunta do usuário: "{texto_msg}"
 Retorne EXCLUSIVAMENTE a query SQL DuckDB dentro de ```sql ... ``` ou 'NAO_SQL'.
 """
+        resp_sql = chamar_gemini(prompt_sql)
+        if resp_sql and "NAO_SQL" not in resp_sql:
+            clean_sql = resp_sql.replace("```sql", "").replace("```", "").strip()
+
     try:
         if not clean_sql:
-            resp_sql = chamar_gemini(prompt_sql)
-            if not resp_sql or "NAO_SQL" in resp_sql:
-                return None
-            clean_sql = resp_sql.replace("```sql", "").replace("```", "").strip()
+            return None
 
         logger.info(f"SQL a executar: {clean_sql}")
         cur = con.execute(clean_sql)
@@ -419,12 +449,13 @@ Retorne EXCLUSIVAMENTE a query SQL DuckDB dentro de ```sql ... ``` ou 'NAO_SQL'.
 
         prompt_formatacao = f"""
 Você é o assistente executivo Joca do Mercado Livre. O usuário '{user_name}' perguntou: "{texto_msg}"
-Dados extraídos do banco oficial:
+Dados extraídos do banco oficial referente a ({desc_tempo}):
 {tabela_str}
 
 Formate uma resposta executiva impecável para o Telegram:
 - Saudação: "📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:"
-- Respeite rigorosamente a hierarquia de negócio: a Categoria vem sempre antes da Subcategoria!
+- Destaque o período consultado ({desc_tempo}).
+- Respeite rigorosamente a hierarquia: Categoria vem antes da Subcategoria!
 - Apresente os números formatados em moeda (R$) e quantidades com separadores de milhar (ex: R$ 3.818.209,99 e 11.119 pedidos).
 - Use tópicos claros, negrito e emojis comerciais nos pontos-chave.
 - Se houver lista de itens ou categorias, numere com clareza.
