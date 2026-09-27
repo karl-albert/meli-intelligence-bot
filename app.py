@@ -64,6 +64,17 @@ SYNC_SECRET = os.environ.get("SYNC_SECRET", "meli_joca_sync_2026_karl")
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PARQUET_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_MaisVendidos.parquet").replace("\\", "/")
+DICIONARIO_FILE = os.path.join(BASE_DIR, "dicionario_dados_ml.json")
+
+DICIONARIO_DADOS = {}
+if os.path.exists(DICIONARIO_FILE):
+    try:
+        with open(DICIONARIO_FILE, "r", encoding="utf-8") as f_dic:
+            DICIONARIO_DADOS = json.load(f_dic)
+        logger.info(f"Dicionário oficial carregado: {len(DICIONARIO_DADOS.get('categorias', {}))} categorias, {DICIONARIO_DADOS.get('total_marcas_unicas', 0)} marcas.")
+    except Exception as e_dic:
+        logger.error(f"Erro ao carregar dicionario_dados_ml.json: {e_dic}")
+
 con = duckdb.connect()
 
 data_recente = None
@@ -280,6 +291,66 @@ def formatar_resultado_python(col_names, rows, user_name, pergunta_usuario, aler
     return "\n".join(linhas)
 
 
+def responder_dicionario_ou_conceito(texto, user_name):
+    if not DICIONARIO_DADOS:
+        return None
+    t = texto.lower().strip()
+    categorias_map = DICIONARIO_DADOS.get("categorias", {})
+    glossario_list = DICIONARIO_DADOS.get("glossario_metricas_tempo", [])
+
+    # 1. Pergunta sobre categorias existentes
+    if any(q in t for q in ["quais sao as categorias", "quais são as categorias", "quais categorias", "listar categorias", "quais as categorias"]):
+        cats = list(categorias_map.keys())
+        msg = [f"📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:\n",
+               "📂 *Categorias Oficiais do Mercado Livre (Nível 1 Macro):*\n"]
+        for i, c in enumerate(cats, 1):
+            n_subs = len(categorias_map[c])
+            msg.append(f"{i}. *{c}* ({n_subs} subcategorias)")
+        msg.append(f"\n📌 _Dicionário de Dados Oficial ML (Power BI) · Atualizado até {data_recente}_")
+        return "\n".join(msg)
+
+    # 2. Pergunta sobre subcategorias de uma categoria específica (sem intenção de soma/venda)
+    m_sub_de = re.search(r'(?:subcategorias|subcategoria)\s+(?:de|da|do)\s+([a-z0-9áéíóúãõç\s,]+)', t)
+    if m_sub_de and not any(w in t for w in ["vendeu", "venda", "faturamento", "faturou", "quanto", "ranking"]):
+        termo_cat = m_sub_de.group(1).strip()
+        cat_match = None
+        for c in categorias_map:
+            if termo_cat in c.lower() or c.lower() in termo_cat:
+                cat_match = c
+                break
+        if cat_match:
+            subs = list(categorias_map[cat_match].keys())
+            msg = [f"📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:\n",
+                   f"📂 *Subcategorias oficiais de '{cat_match}':*\n"]
+            for i, s in enumerate(subs, 1):
+                marcas = categorias_map[cat_match][s]
+                marcas_str = f" _(ex: {', '.join(marcas[:3])})_" if marcas else ""
+                msg.append(f"{i}. *{s}*{marcas_str}")
+            msg.append(f"\n📌 _Hierarquia Oficial: Categoria '{cat_match}' > {len(subs)} Subcategorias_")
+            return "\n".join(msg)
+
+    # 3. Pergunta sobre conceitos ou siglas (YTDA, MTD, MoM, YoY, M-1, Forecast, Orçado, etc.)
+    for item in glossario_list:
+        sigla = item.get("sigla", "").lower().strip()
+        termo = item.get("termo", "").lower().strip()
+        exp = item.get("explicacao", "").strip()
+        
+        eh_pergunta_conceito = (
+            re.search(r'\b(o que e|o que é|o que significa|significado de|definicao de|definição de|conceito de)\s+' + re.escape(sigla) + r'\b', t) or
+            re.search(r'\b(o que e|o que é|o que significa|significado de|definicao de|definição de|conceito de)\s+' + re.escape(termo) + r'\b', t) or
+            (len(sigla) >= 3 and t in [sigla, f'o que e {sigla}', f'o que é {sigla}', f'{sigla}?'])
+        )
+        if eh_pergunta_conceito:
+            return (
+                f"📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:\n\n"
+                f"📖 *Termo:* `{item['sigla'].upper()}` ({item['termo']})\n"
+                f"💡 *Definição Oficial:* {exp if exp else item['termo']}\n\n"
+                f"📌 _Dicionário de Métricas e Estrutura Temporal do Projeto Power BI_"
+            )
+            
+    return None
+
+
 def processar_pergunta(texto_msg, user_name):
     t_lower = texto_msg.lower().strip()
     
@@ -307,7 +378,12 @@ def processar_pergunta(texto_msg, user_name):
             f"📌 _Hoje a base já está atualizada com dados em tempo real até {data_recente}!_"
         )
 
-    # 2. Motor de Inteligência Analítica e Dicionário de Negócio
+    # 2. Respostas Conceituais do Dicionário de Dados Oficial
+    resp_dic = responder_dicionario_ou_conceito(texto_msg, user_name)
+    if resp_dic:
+        return resp_dic
+
+    # 3. Motor de Inteligência Analítica e Dicionário de Negócio
     dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
     ano_recente = dt_obj.year
     mes_recente = dt_obj.month
@@ -426,6 +502,7 @@ def processar_pergunta(texto_msg, user_name):
             break
 
     # Quando o usuário pede algo como Categoria, mas o nome é de uma Subcategoria
+    alerta_didatico = None
     if disse_categoria and achou_sub and not achou_cat:
         k_sub, cat_pai, sub_nome = achou_sub
         if cat_pai:
@@ -607,7 +684,7 @@ def home():
 def status():
     return jsonify({
         "status": "online",
-        "versao": "2.4.0 - Motor Analitico e Didatico Resiliente",
+        "versao": "2.5.0 - Dicionario de Dados Oficial Integrado",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "bot": "@Joca_Meli_bot"

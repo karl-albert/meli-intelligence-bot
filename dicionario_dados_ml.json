@@ -1,0 +1,465 @@
+{
+  "versao": "1.0.0",
+  "descricao": "Dicionário de Dados Oficial do Mercado Livre - Projeto Power BI Karl Albert",
+  "categorias": {
+    "Casa, Móveis e Decoração": {
+      "Cama e Banho": [
+        "Altenburg",
+        "Fibrasca",
+        "Casa Laura",
+        "Kacyumara",
+        "Santista",
+        "Buddemeyer",
+        "Enxoval.com",
+        "Ortobom"
+      ],
+      "Cozinha": [
+        "Dohler",
+        "Mak-Inox",
+        "Wellmix",
+        "Brinox",
+        "Tramontina"
+      ],
+      "Decoração": [
+        "Herweg",
+        "DcorHome",
+        "ArteQuadros",
+        "Texfine",
+        "Premier",
+        "Luizatex"
+      ],
+      "Móveis": [
+        "SuedeArt",
+        "ArtFactory",
+        "Notável",
+        "Araplac",
+        "Conforsit",
+        "MobiStore",
+        "Madesa"
+      ],
+      "Iluminação": [
+        "Importado",
+        "Positivo",
+        "G-Light"
+      ],
+      "Organização": [
+        "Buba",
+        "VbHome",
+        "Paramount"
+      ],
+      "Banheiro": [
+        "Astra",
+        "Future",
+        "Pingoo"
+      ],
+      "Utensílios de Cozinha": [
+        "Tramontina"
+      ],
+      "Artigos de Festas": [
+        "Festcolor"
+      ],
+      "Utilidades": [
+        "Tramontina",
+        "Oikos"
+      ],
+      "Lavanderia": [
+        "Oikos",
+        "Mor"
+      ],
+      "Segurança": [
+        "Woosh",
+        "Intelbras"
+      ],
+      "Jardim": [
+        "Marqs Home"
+      ],
+      "Limpeza": [
+        "FlashLimp"
+      ],
+      "Malas": [
+        "Santino"
+      ]
+    },
+    "Celulares e Telefones": {
+      "Carregadores": [
+        "Boyu Cell",
+        "Baseus",
+        "Samsung",
+        "Geonav",
+        "Apple",
+        "Hardline"
+      ],
+      "Smartphones": [
+        "Xiaomi",
+        "Apple",
+        "Motorola",
+        "Samsung"
+      ],
+      "Áudio Mobile": [
+        "JBL",
+        "Xiaomi",
+        "Soundcore",
+        "Apple",
+        "QCY"
+      ],
+      "Acessórios": [
+        "Hprime",
+        "Customic",
+        "SportFit"
+      ],
+      "Cabos": [
+        "Ugreen",
+        "Apple"
+      ],
+      "Suportes": [
+        "Ugreen",
+        "Baseus"
+      ],
+      "Adaptadores": [
+        "Samsung",
+        "Apple"
+      ],
+      "Memória": [
+        "SanDisk"
+      ],
+      "Smartwatches": [
+        "Xiaomi",
+        "Samsung"
+      ]
+    },
+    "Eletrodomésticos": {
+      "Cozinha": [
+        "Lenoxx",
+        "Britânia",
+        "Cadence",
+        "Unitermi",
+        "Elgin",
+        "Philips Walita",
+        "Mueller",
+        "Suggar",
+        "Itatiaia",
+        "Arno",
+        "Três Corações",
+        "Oster",
+        "Electrolux",
+        "Philco",
+        "Mondial"
+      ],
+      "Climatização": [
+        "Fisher Price",
+        "Ventisol",
+        "Mondial"
+      ],
+      "Purificadores": [
+        "Consul",
+        "Electrolux"
+      ],
+      "Eletroportáteis": [
+        "SF-400"
+      ],
+      "Limpeza": [
+        "Mondial",
+        "WAP"
+      ],
+      "Cuidados Roupas": [
+        "Arno",
+        "Black+Decker"
+      ],
+      "Lavanderia": [
+        "Mueller",
+        "Midea",
+        "Electrolux"
+      ],
+      "Bebedouros": [
+        "Esmaltec"
+      ],
+      "Refrigeração": [
+        "Brastemp",
+        "Consul"
+      ]
+    },
+    "Ferramentas e Construção": {
+      "Elétrica": [
+        "3M",
+        "LEF",
+        "Margirius",
+        "Minipa",
+        "Clamper",
+        "Parosflux",
+        "Lorenzetti"
+      ],
+      "Manuais": [
+        "Gedore",
+        "Sparta",
+        "Vonder",
+        "Tramontina"
+      ],
+      "Elétricas": [
+        "Gamma",
+        "Mondial",
+        "DeWalt",
+        "Bosch",
+        "Makita"
+      ],
+      "Construção": [
+        "Tekbond",
+        "Pulvitec",
+        "Dryko",
+        "Mor"
+      ],
+      "Acessórios": [
+        "Groove",
+        "Tramontina",
+        "Norton",
+        "Bosch"
+      ],
+      "Pintura": [
+        "Tramontina",
+        "3M",
+        "Atlas",
+        "Steula"
+      ],
+      "Medição": [
+        "Sparta",
+        "Lufkin",
+        "Mileseey"
+      ],
+      "Hidráulica": [
+        "Camperluz"
+      ],
+      "Segurança": [
+        "Titanium"
+      ],
+      "Iluminação": [
+        "Avant"
+      ],
+      "Limpeza": [
+        "WAP",
+        "Kärcher"
+      ],
+      "Solda": [
+        "Boxer"
+      ],
+      "Pneumática": [
+        "Chiaperini"
+      ]
+    },
+    "Informática": {
+      "Hardware": [
+        "Arctic",
+        "Corsair",
+        "Asus",
+        "Rise Mode",
+        "AMD",
+        "Kingston",
+        "Galax"
+      ],
+      "Periféricos": [
+        "Redragon",
+        "Logitech"
+      ],
+      "Armazenamento": [
+        "SanDisk",
+        "Kingston"
+      ],
+      "Redes": [
+        "Furukawa",
+        "TP-Link"
+      ],
+      "Acessórios": [
+        "Baseus",
+        "Exbom",
+        "ELG"
+      ],
+      "Impressão 3D": [
+        "Masterprint",
+        "Voolt3D"
+      ],
+      "Games": [
+        "Microsoft",
+        "Nintendo",
+        "Sony"
+      ],
+      "Notebooks": [
+        "Apple",
+        "Acer",
+        "Lenovo",
+        "Asus",
+        "Dell",
+        "Samsung"
+      ],
+      "Energia": [
+        "Clamper"
+      ],
+      "Monitores": [
+        "LG"
+      ],
+      "Áudio PC": [
+        "Redragon"
+      ],
+      "Suprimentos": [
+        "Epson"
+      ],
+      "Móveis PC": [
+        "ThunderX3"
+      ],
+      "Impressão": [
+        "Epson"
+      ]
+    }
+  },
+  "glossario_metricas_tempo": [
+    {
+      "termo": "Year to Date",
+      "sigla": "YTDA",
+      "explicacao": "Acumulado Ano"
+    },
+    {
+      "termo": "Month to Date",
+      "sigla": "MTD",
+      "explicacao": "Acumulado Mês"
+    },
+    {
+      "termo": "Month over Month",
+      "sigla": "MoM",
+      "explicacao": "Mês ano atual /Mesmo Mês ano anterior"
+    },
+    {
+      "termo": "Year over Year",
+      "sigla": "YoY",
+      "explicacao": "Ano /ano anterior"
+    },
+    {
+      "termo": "Mes Anterior",
+      "sigla": "M-1",
+      "explicacao": "Mes Anterior"
+    },
+    {
+      "termo": "Mês posterior",
+      "sigla": "M+1",
+      "explicacao": "Mês posterior"
+    },
+    {
+      "termo": "Orçado",
+      "sigla": "O",
+      "explicacao": "Orçado"
+    },
+    {
+      "termo": "Realizado",
+      "sigla": "R",
+      "explicacao": "Realizado"
+    },
+    {
+      "termo": "Forecast",
+      "sigla": "F",
+      "explicacao": "Forecast"
+    },
+    {
+      "termo": "Real + Forecast",
+      "sigla": "R+F",
+      "explicacao": "Real + Forecast"
+    },
+    {
+      "termo": "Desafio",
+      "sigla": "D",
+      "explicacao": "Desafio"
+    },
+    {
+      "termo": "Last Year",
+      "sigla": "LY",
+      "explicacao": "Ano Passado"
+    },
+    {
+      "termo": "Variação Absoluta",
+      "sigla": "∆ ABS",
+      "explicacao": "Variação Absoluta"
+    },
+    {
+      "termo": "Variação Percentual",
+      "sigla": "∆ %",
+      "explicacao": ""
+    },
+    {
+      "termo": "Faturamento_Estimado_Dia.",
+      "sigla": "Faturamento",
+      "explicacao": "É o Preço_Atual x QTD_Vendas"
+    },
+    {
+      "termo": "QTD_Vendas",
+      "sigla": "Vendas",
+      "explicacao": "É a quantidade de vendas em Unidades"
+    },
+    {
+      "termo": "QTD_Vendas",
+      "sigla": "Vendeu",
+      "explicacao": "É a quantidade de vendas em Unidades"
+    },
+    {
+      "termo": "Preco_Atual.",
+      "sigla": "Preço",
+      "explicacao": "É o Preço no momento mais recente"
+    },
+    {
+      "termo": "Qtd_Avaliacoes.",
+      "sigla": "Avaliações",
+      "explicacao": "É a quantidade de avaliações feitas pelas pessoas"
+    },
+    {
+      "termo": "Preco_Original.",
+      "sigla": "Preço Inicial",
+      "explicacao": "É o preço inicial"
+    },
+    {
+      "termo": "Avaliacao_Nota.",
+      "sigla": "Avaliação",
+      "explicacao": "É a nota dada na avaliação"
+    },
+    {
+      "termo": "Avaliacao_Nota.",
+      "sigla": "Nota",
+      "explicacao": "É a avaliação onde será atribuida uma nota"
+    },
+    {
+      "termo": "desconto_pct",
+      "sigla": "Em %",
+      "explicacao": "Em %"
+    },
+    {
+      "termo": "frete_gratis",
+      "sigla": "Sim ou Não",
+      "explicacao": "Sim ou Não"
+    },
+    {
+      "termo": "id_anuncio",
+      "sigla": "Codigo de Anuncio",
+      "explicacao": "Codigo de Anuncio"
+    },
+    {
+      "termo": "loja_oficial",
+      "sigla": "Da Marca ou Market Place",
+      "explicacao": "Da Marca ou Market Place"
+    },
+    {
+      "termo": "reputação_vendedor",
+      "sigla": "Mercado Lider Platinum",
+      "explicacao": "Mercado Lider Platinum"
+    },
+    {
+      "termo": "tipo_dado",
+      "sigla": "Oficial ou Sintetico",
+      "explicacao": "Oficial ou Sintetico"
+    },
+    {
+      "termo": "url_imagem",
+      "sigla": "caminho imagem",
+      "explicacao": "caminho imagem"
+    },
+    {
+      "termo": "url_produto",
+      "sigla": "caminho produto",
+      "explicacao": "caminho produto"
+    }
+  ],
+  "total_produtos_mapeados": 254,
+  "total_marcas_unicas": 136
+}
