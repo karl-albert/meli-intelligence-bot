@@ -1151,16 +1151,16 @@ def home():
                             <span class="tag-pill tag-bq">Google BigQuery Engine</span>
                         </div>
                         <div class="card-body">
-                            <p>Assistente executivo oficial para inteligência de vendas e análise no BigQuery.</p>
+                            <p>Assistente analítico oficial para inteligência de vendas e análise no BigQuery.</p>
                             <div class="card-info-box">
-                                <div><span style="color:#64748b;">Bot:</span> <strong>Joca_BigQuery (@Joca_Meli_bot)</strong></div>
+                                <div><span style="color:#64748b;">Bot:</span> <strong>Joca_BigQuery</strong></div>
                                 <div><span style="color:#64748b;">Webhook:</span> <code>/webhook</code></div>
                                 <div><span style="color:#64748b;">Status:</span> <span style="color:#4ade80;">Ativo 🟢</span></div>
                             </div>
                         </div>
                     </div>
                     <div class="btn-group">
-                        <a href="https://t.me/Joca_Meli_bot" target="_blank" class="btn btn-tg">Abrir no Telegram</a>
+                        <a href="https://t.me/Joca_BigQuery_bot" target="_blank" class="btn btn-tg">Abrir no Telegram</a>
                         <a href="/set_webhook" class="btn btn-wh">Ativar Webhook</a>
                     </div>
                 </div>
@@ -1173,16 +1173,16 @@ def home():
                             <span class="tag-pill tag-fabric">Microsoft Fabric Direct Lake</span>
                         </div>
                         <div class="card-body">
-                            <p>Assistente executivo integrado ao Lakehouse e Direct Lake no Microsoft Fabric.</p>
+                            <p>Assistente analítico integrado ao Lakehouse e Direct Lake no Microsoft Fabric.</p>
                             <div class="card-info-box">
-                                <div><span style="color:#64748b;">Bot:</span> <strong>Joca_Fabric (@Joca_Meli_Fabric_bot)</strong></div>
+                                <div><span style="color:#64748b;">Bot:</span> <strong>Joca_Fabric</strong></div>
                                 <div><span style="color:#64748b;">Webhook:</span> <code>/webhook_fabric</code></div>
                                 <div><span style="color:#64748b;">Status:</span> <span style="color:#4ade80;">Ativo 🟢</span></div>
                             </div>
                         </div>
                     </div>
                     <div class="btn-group">
-                        <a href="https://t.me/Joca_Meli_Fabric_bot" target="_blank" class="btn btn-tg">Abrir no Telegram</a>
+                        <a href="https://t.me/Joca_Fabric_bot" target="_blank" class="btn btn-tg">Abrir no Telegram</a>
                         <a href="/set_webhook_fabric" class="btn btn-wh">Ativar Webhook</a>
                     </div>
                 </div>
@@ -1201,7 +1201,7 @@ def home():
 def status():
     return jsonify({
         "status": "online",
-        "versao": "2.9.0 - Dual Bot Hub (Joca_BigQuery + Joca_Fabric) + Rate Limiter Anti-Spam",
+        "versao": "3.0.0 - Dual Bot Hub (Joca_BigQuery + Joca_Fabric) + Rate Limiter Anti-Spam",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "total_conversas_registradas": len(carregar_conversas()),
@@ -1211,8 +1211,8 @@ def status():
             "limite_global_gemini_rpm": rate_limiter.max_global_gemini_rpm
         },
         "bots": {
-            "bigquery": "Joca_BigQuery (@Joca_Meli_bot)",
-            "fabric": "Joca_Fabric (@Joca_Meli_Fabric_bot)"
+            "bigquery": "Joca_BigQuery",
+            "fabric": "Joca_Fabric"
         }
     })
 
@@ -1293,8 +1293,8 @@ def webhook_fabric():
 def set_webhook():
     host_url = request.host_url.replace("http://", "https://").rstrip("/")
     webhook_url = f"{host_url}/webhook"
-    res = requests.post(f"{BASE_URL_MELI}/setWebhook", json={"url": webhook_url}).json()
-    return jsonify({"bot": "Joca_BigQuery (@Joca_Meli_bot)", "telegram_response": res, "webhook_url": webhook_url})
+    res = requests.post(f"{BASE_URL_BQ}/setWebhook", json={"url": webhook_url}).json()
+    return jsonify({"bot": "Joca_BigQuery", "telegram_response": res, "webhook_url": webhook_url})
 
 
 @app.route("/set_webhook_fabric", methods=["GET"])
@@ -1302,20 +1302,20 @@ def set_webhook_fabric():
     host_url = request.host_url.replace("http://", "https://").rstrip("/")
     webhook_url = f"{host_url}/webhook_fabric"
     res = requests.post(f"{BASE_URL_FABRIC}/setWebhook", json={"url": webhook_url}).json()
-    return jsonify({"bot": "Joca_Fabric (@Joca_Meli_Fabric_bot)", "telegram_response": res, "webhook_url": webhook_url})
+    return jsonify({"bot": "Joca_Fabric", "telegram_response": res, "webhook_url": webhook_url})
 
 
 @app.route("/set_all_webhooks", methods=["GET"])
 def set_all_webhooks():
     host_url = request.host_url.replace("http://", "https://").rstrip("/")
-    wh_meli = f"{host_url}/webhook"
+    wh_bq = f"{host_url}/webhook"
     wh_fabric = f"{host_url}/webhook_fabric"
-    res_meli = requests.post(f"{BASE_URL_MELI}/setWebhook", json={"url": wh_meli}).json()
+    res_bq = requests.post(f"{BASE_URL_BQ}/setWebhook", json={"url": wh_bq}).json()
     res_fabric = requests.post(f"{BASE_URL_FABRIC}/setWebhook", json={"url": wh_fabric}).json()
     return jsonify({
         "status": "success",
-        "joca_bigquery": {"bot": "Joca_BigQuery (@Joca_Meli_bot)", "url": wh_meli, "response": res_meli},
-        "joca_fabric": {"bot": "Joca_Fabric (@Joca_Meli_Fabric_bot)", "url": wh_fabric, "response": res_fabric}
+        "joca_bigquery": {"bot": "Joca_BigQuery", "url": wh_bq, "response": res_bq},
+        "joca_fabric": {"bot": "Joca_Fabric", "url": wh_fabric, "response": res_fabric}
     })
 
 
