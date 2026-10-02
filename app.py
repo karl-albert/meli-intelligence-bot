@@ -18,6 +18,7 @@ import asyncio
 import io
 import re
 import threading
+import time
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import google.generativeai as genai
@@ -85,6 +86,35 @@ if os.path.exists(DICIONARIO_FILE):
         logger.info(f"Dicionário oficial carregado: {len(DICIONARIO_DADOS.get('categorias', {}))} categorias, {DICIONARIO_DADOS.get('total_marcas_unicas', 0)} marcas.")
     except Exception as e_dic:
         logger.error(f"Erro ao carregar dicionario_dados_ml.json: {e_dic}")
+
+# ------------------------------------------------------------------------------
+# TELEMETRIA E LOG DE CONVERSAS DOS BOTS (PARA O POWER BI)
+# ------------------------------------------------------------------------------
+CONVERSAS_LOG_FILE = os.path.join(BASE_DIR, "conversas_log.json")
+conversas_lock = threading.Lock()
+
+def carregar_conversas():
+    if os.path.exists(CONVERSAS_LOG_FILE):
+        try:
+            with open(CONVERSAS_LOG_FILE, "r", encoding="utf-8") as f_c:
+                return json.load(f_c)
+        except Exception as e_c:
+            logger.error(f"Erro ao carregar conversas_log.json: {e_c}")
+    return []
+
+def salvar_conversa(registro):
+    with conversas_lock:
+        try:
+            historico = carregar_conversas()
+            historico.append(registro)
+            # Mantém os últimos 2.000 registros para garantir alta velocidade
+            if len(historico) > 2000:
+                historico = historico[-2000:]
+            with open(CONVERSAS_LOG_FILE, "w", encoding="utf-8") as f_w:
+                json.dump(historico, f_w, ensure_ascii=False, indent=2)
+            logger.info(f"Registro de conversa salvo com sucesso (ID: {registro.get('id')})")
+        except Exception as e_s:
+            logger.error(f"Erro ao salvar conversa em conversas_log.json: {e_s}")
 
 con = duckdb.connect()
 
@@ -309,6 +339,7 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
         if not texto:
             return
 
+        t_inicio = time.time()
         requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "typing"}, timeout=5)
 
         resposta = processar_pergunta(texto, user_name) or (
@@ -320,6 +351,37 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
         )
 
         enviar_mensagem(chat_id, resposta, base_url=base_url)
+
+        # Gravar log de telemetria da conversa para consumo no Power BI
+        try:
+            t_duracao = round(time.time() - t_inicio, 2)
+            from_user = msg.get("from", {})
+            p_nome = from_user.get("first_name", "")
+            u_nome = from_user.get("last_name", "")
+            nome_completo = f"{p_nome} {u_nome}".strip() or user_name
+            username_val = from_user.get("username", "")
+            username_str = f"@{username_val}" if username_val else "-"
+            agora = datetime.now()
+            bot_tag = "Joca Meli" if "Meli Intelligence Bot" in bot_label else "Joca Fabric"
+            
+            reg_conversa = {
+                "id": msg.get("message_id") or int(time.time()),
+                "data_hora": agora.strftime("%Y-%m-%d %H:%M:%S"),
+                "data": agora.strftime("%Y-%m-%d"),
+                "hora": agora.strftime("%H:%M:%S"),
+                "bot": bot_tag,
+                "chat_id": str(chat_id),
+                "usuario": nome_completo,
+                "username": username_str,
+                "tipo_entrada": "Voz" if origem_audio else "Texto",
+                "pergunta": texto,
+                "resposta": resposta,
+                "tempo_resposta_s": t_duracao,
+                "status": "Sucesso" if resposta else "Erro"
+            }
+            salvar_conversa(reg_conversa)
+        except Exception as e_log:
+            logger.error(f"Erro ao registrar telemetria da conversa: {e_log}")
 
         quer_audio = origem_audio or any(w in texto.lower() for w in ["áudio", "audio", "por voz", "fale", "mande áudio", "voz"])
         if quer_audio:
@@ -1031,14 +1093,31 @@ def home():
 def status():
     return jsonify({
         "status": "online",
-        "versao": "2.6.0 - Dual Bot Hub (Meli + Fabric)",
+        "versao": "2.7.0 - Dual Bot Hub + Power BI Telemetry",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
+        "total_conversas_registradas": len(carregar_conversas()),
         "bots": {
             "meli": "@Joca_Meli_bot",
             "fabric": "@Joca_Meli_Fabric_bot"
         }
     })
+
+
+@app.route("/api/conversas", methods=["GET"])
+def api_conversas():
+    """Endpoint oficial para consumo de telemetria das conversas no Power BI (Power Query)"""
+    try:
+        bot_filtro = request.args.get("bot", "").strip().lower()
+        limite = int(request.args.get("limit", 2000))
+        dados = carregar_conversas()
+        if bot_filtro:
+            dados = [d for d in dados if bot_filtro in d.get("bot", "").lower()]
+        # Retorna lista de registros ordenada por data/hora
+        return jsonify(dados[-limite:])
+    except Exception as e:
+        logger.error(f"Erro no endpoint /api/conversas: {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/webhook", methods=["GET", "POST"])
