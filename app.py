@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 ========================================================================================
-MELI INTELLIGENCE BOT - RENDER.COM WEB SERVICE (24/7 NUVEM GRATUITA)
+JOCA INTELLIGENCE HUB (Joca_BigQuery & Joca_Fabric) - RENDER.COM WEB SERVICE (24/7)
 DuckDB + Parquet (158.250 registros) + Google Gemini Flash + Telegram Webhook
 ========================================================================================
 """
@@ -28,34 +28,36 @@ import google.generativeai as genai
 # 1. CONFIGURAÇÕES DE LOG E FLASK
 # ==============================================================================
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("Render_Meli_Bot")
+logger = logging.getLogger("Render_Joca_Hub")
 
 app = Flask(__name__)
 
 # ==============================================================================
 # 2. CREDENCIAIS E TOKENS (BASE64 E VARIÁVEIS DE AMBIENTE)
 # ==============================================================================
-_B64_TOK_MELI = "ODkxNjczMzY3MTpBQUgxaHR2ZDZWcURLc25nZHlZc0ZPYVhkdk5nVVEwUmp5TQ=="
+_B64_TOK_BQ = "ODkxNjczMzY3MTpBQUgxaHR2ZDZWcURLc25nZHlZc0ZPYVhkdk5nVVEwUmp5TQ=="
 _B64_TOK_FABRIC = "ODk1ODUyNTM2MzpBQUgwUkQwbDhlWHZyZTFZeTJYVE90VkxuT0FCOGx1UWRoRQ=="
 _B64_GEM = "QVEuQWI4Uk42S3RWbzR3RkhZTVA4a3FiMXplWXo2dmRTLVRrakd3ZG1yY18xbzY4MURuUUE="
 
 FALLBACK_KEY = base64.b64decode(_B64_GEM).decode("utf-8").strip()
-FALLBACK_TOKEN_MELI = base64.b64decode(_B64_TOK_MELI).decode("utf-8").strip()
+FALLBACK_TOKEN_BQ = base64.b64decode(_B64_TOK_BQ).decode("utf-8").strip()
 FALLBACK_TOKEN_FABRIC = base64.b64decode(_B64_TOK_FABRIC).decode("utf-8").strip()
 
 env_key = os.environ.get("GEMINI_KEY", "").strip()
 GEMINI_KEY = env_key if (env_key and len(env_key) > 20) else FALLBACK_KEY
 
 env_token = os.environ.get("TELEGRAM_TOKEN", "").strip()
-TOKEN_MELI = env_token if (env_token and len(env_token) > 20) else FALLBACK_TOKEN_MELI
+TOKEN_BQ = env_token if (env_token and len(env_token) > 20) else FALLBACK_TOKEN_BQ
+TOKEN_MELI = TOKEN_BQ
 
 env_token_fabric = os.environ.get("TELEGRAM_TOKEN_FABRIC", "").strip()
 TOKEN_FABRIC = env_token_fabric if (env_token_fabric and len(env_token_fabric) > 20) else FALLBACK_TOKEN_FABRIC
 
 # Configuração e Retrocompatibilidade
 TOKEN = TOKEN_MELI
-BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN_MELI}"
-BASE_URL_MELI = f"https://api.telegram.org/bot{TOKEN_MELI}"
+BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN_BQ}"
+BASE_URL_BQ = f"https://api.telegram.org/bot{TOKEN_BQ}"
+BASE_URL_MELI = BASE_URL_BQ
 BASE_URL_FABRIC = f"https://api.telegram.org/bot{TOKEN_FABRIC}"
 
 # Configurar Google Gemini
@@ -69,7 +71,7 @@ AVAILABLE_MODELS = [
     "gemini-3.8-flash"
 ]
 
-SYNC_SECRET = os.environ.get("SYNC_SECRET", "meli_joca_sync_2026_karl")
+SYNC_SECRET = os.environ.get("SYNC_SECRET", "joca_sync_2026_karl")
 
 # ==============================================================================
 # 3. BANCO DE DADOS (DUCKDB + PARQUET)
@@ -270,7 +272,7 @@ def transcrever_audio(audio_bytes, mime_type="audio/ogg"):
 def gerar_roteiro_fala(texto_resposta, user_name):
     """Cria fala natural executiva estruturada para síntese em áudio"""
     prompt_fala = f"""
-Você é o assistente virtual executivo Joca do Mercado Livre.
+Você é o assistente virtual executivo Joca_BigQuery, especialista em inteligência analítica de vendas.
 Abaixo está a resposta em texto formatado para o Telegram:
 {texto_resposta}
 
@@ -295,7 +297,7 @@ Regras obrigatórias:
 # ==============================================================================
 def enviar_mensagem(chat_id, texto, base_url=None):
     if not base_url:
-        base_url = BASE_URL_MELI
+        base_url = BASE_URL_BQ
     try:
         url = f"{base_url}/sendMessage"
         payload = {
@@ -327,7 +329,7 @@ async def _sintetizar_edge(texto):
 def enviar_voz(chat_id, texto_fala, base_url=None):
     """Sintetiza e envia áudio via Edge-TTS (Masculino) ou gTTS (Fallback)"""
     if not base_url:
-        base_url = BASE_URL_MELI
+        base_url = BASE_URL_BQ
     try:
         audio_data = None
         try:
@@ -396,7 +398,7 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
                 username_val = user_obj.get("username", "")
                 username_str = f"@{username_val}" if username_val else "-"
                 agora = datetime.now()
-                bot_tag = "Joca Meli" if "Meli Intelligence Bot" in bot_label else "Joca Fabric"
+                bot_tag = "Joca_BigQuery" if "BigQuery" in bot_label else "Joca_Fabric"
                 
                 salvar_conversa({
                     "id": msg.get("message_id") or int(time.time()),
@@ -468,7 +470,7 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
             username_val = from_user.get("username", "")
             username_str = f"@{username_val}" if username_val else "-"
             agora = datetime.now()
-            bot_tag = "Joca Meli" if "Meli Intelligence Bot" in bot_label else "Joca Fabric"
+            bot_tag = "Joca_BigQuery" if "BigQuery" in bot_label else "Joca_Fabric"
             
             reg_conversa = {
                 "id": msg.get("message_id") or int(time.time()),
@@ -530,7 +532,7 @@ def formatar_resultado_python(col_names, rows, user_name, pergunta_usuario, aler
         if len(rows) > 8:
             linhas.append(f"\n_... e mais {len(rows) - 8} registros encontrados._")
 
-    linhas.append(f"\n📌 _Dados da base do ML (Power BI) · Atualizado até {data_recente}_")
+    linhas.append(f"\n📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente}_")
     return "\n".join(linhas)
 
 
@@ -545,7 +547,7 @@ def responder_dicionario_ou_conceito(texto, user_name):
     if any(q in t for q in ["quais sao as categorias", "quais são as categorias", "quais categorias", "listar categorias", "quais as categorias"]):
         cats = list(categorias_map.keys())
         msg = [f"📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:\n",
-               "📂 *Categorias Oficiais do Mercado Livre (Nível 1 Macro):*\n"]
+               "📂 *Categorias Oficiais da Base Analítica (Nível 1 Macro):*\n"]
         for i, c in enumerate(cats, 1):
             n_subs = len(categorias_map[c])
             msg.append(f"{i}. *{c}* ({n_subs} subcategorias)")
@@ -600,8 +602,8 @@ def processar_pergunta(texto_msg, user_name):
     # 1. Comandos de Saudação e Ajudas Rápidas
     if t_lower in ['/start', '/ajuda', 'oi', 'ola', 'olá', 'start']:
         return (
-            f"👋 *Olá {user_name}! Eu sou o Meli Intelligence Bot (Render 24/7).*\n\n"
-            f"Estou com a IA do **Google Gemini** integrada à base oficial de Mais Vendidos do Mercado Livre.\n"
+            f"👋 *Olá {user_name}! Eu sou o Joca_BigQuery (Render 24/7).*\n\n"
+            f"Estou com a IA do **Google Gemini** integrada à base analítica de vendas do BigQuery.\n"
             f"📅 *Base atualizada até:* `{data_recente}` ({total_registros:,} registros sincronizados).\n\n"
             f"🎙️ *Modo Voz Ativo:* Você pode mandar **mensagem de voz / áudio** no Telegram que eu compreendo e te respondo falando!\n\n"
             f"💡 *Exemplos de perguntas:*\n"
@@ -612,13 +614,13 @@ def processar_pergunta(texto_msg, user_name):
     
     if 'slide' in t_lower and ('exemplo' in t_lower or 'caso' in t_lower):
         return (
-            f"🤖 *Meli Intelligence Bot* · _Caso de Uso do Slide 5_\n"
+            f"🤖 *Joca_BigQuery* · _Caso de Uso do Slide 5_\n"
             f"No caso de uso do Slide 5 (dia 18/09/2026):\n\n"
             f"📦 *Volume Vendido Apple:* 40 unidades\n"
             f"💰 *Faturamento Estimado:* R$ 535.680\n"
             f"🏷️ *Preço Médio:* R$ 13.392,01  ·  *% FULL:* 151%\n"
             f"🏆 *Top 1 Anúncio:* iPhone 18 PRO MAX 512GB (10 unidades)\n\n"
-            f"📌 _Hoje a base já está atualizada com dados em tempo real até {data_recente}!_"
+            f"📌 _Base analítica atualizada com dados em tempo real até {data_recente}!_"
         )
 
     # 2. Respostas Conceituais do Dicionário de Dados Oficial
@@ -632,7 +634,7 @@ def processar_pergunta(texto_msg, user_name):
     mes_recente = dt_obj.month
     ontem_str = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    # Mapeamento oficial de Categorias do Mercado Livre (Nível 1 - 5 categorias macro)
+    # Mapeamento oficial de Categorias (Nível 1 - 5 categorias macro)
     MAPA_CATEGORIAS = {
         'informatica': 'Informática', 'informática': 'Informática', 'ti': 'Informática',
         'celular': 'Celulares e Telefones', 'celulares': 'Celulares e Telefones', 'telefone': 'Celulares e Telefones', 'telefones': 'Celulares e Telefones',
@@ -641,7 +643,7 @@ def processar_pergunta(texto_msg, user_name):
         'casa': 'Casa, Móveis e Decoração', 'moveis': 'Casa, Móveis e Decoração', 'móveis': 'Casa, Móveis e Decoração', 'decoracao': 'Casa, Móveis e Decoração', 'decoração': 'Casa, Móveis e Decoração'
     }
 
-    # Mapeamento oficial de Subcategorias do Mercado Livre (Nível 2 subordinado à Categoria)
+    # Mapeamento oficial de Subcategorias (Nível 2 subordinado à Categoria)
     MAPA_SUBCATEGORIAS = {
         # Celulares e Telefones
         'smartphones': ('Celulares e Telefones', 'Smartphones'), 'smartphone': ('Celulares e Telefones', 'Smartphones'),
@@ -833,7 +835,7 @@ def processar_pergunta(texto_msg, user_name):
     # 3. Text-to-SQL de Contingência via Gemini (para consultas livres não cobertas pelas regras acima)
     if not clean_sql:
         prompt_sql = f"""
-Você é o motor analítico SQL DuckDB especialista do Mercado Livre Brasil.
+Você é o motor analítico SQL DuckDB especialista em dados de vendas e inteligência analítica.
 Tabela: 'fato_ml' | Período solicitado: {desc_tempo} (filtro: {where_tempo})
 
 REGRAS DE TEMPO CRUCIAIS:
@@ -870,14 +872,14 @@ Retorne EXCLUSIVAMENTE a query SQL DuckDB dentro de ```sql ... ``` ou 'NAO_SQL'.
         rows = cur.fetchall()
         
         if not rows:
-            return f"📊 Olá {user_name}! Pesquisei aqui na base oficial do Mercado Livre mas não encontrei registros para essa pesquisa específica."
+            return f"📊 Olá {user_name}! Pesquisei aqui na base oficial mas não encontrei registros para essa pesquisa específica."
 
         header_str = " | ".join(col_names)
         linhas_tab = [" | ".join([str(v) if v is not None else "NULL" for v in r]) for r in rows[:15]]
         tabela_str = f"{header_str}\n" + ("-" * len(header_str)) + "\n" + "\n".join(linhas_tab)
 
         prompt_formatacao = f"""
-Você é o assistente executivo Joca do Mercado Livre. O usuário '{user_name}' perguntou: "{texto_msg}"
+Você é o assistente executivo Joca_BigQuery. O usuário '{user_name}' perguntou: "{texto_msg}"
 Dados extraídos do banco oficial referente a ({desc_tempo}):
 {tabela_str}
 
@@ -891,7 +893,7 @@ Formate uma resposta executiva impecável para o Telegram:
 - Apresente os números formatados em moeda (R$) e quantidades com separadores de milhar (ex: R$ 3.818.209,99 e 11.119 pedidos).
 - Use tópicos claros, negrito e emojis comerciais nos pontos-chave.
 - Se houver lista de itens ou categorias, numere com clareza.
-- Rodapé obrigatório: "📌 _Dados da base do ML (Power BI) · Atualizado até {data_recente}_"
+- Rodapé obrigatório: "📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente}_"
 """
         resp_final = chamar_gemini(prompt_formatacao)
         return resp_final if resp_final else formatar_resultado_python(col_names, rows, user_name, texto_msg, alerta=alerta_didatico)
@@ -1020,7 +1022,7 @@ def home():
                 transform: translateY(-4px);
                 border-color: rgba(255, 255, 255, 0.2);
             }}
-            .card.meli {{
+            .card.bq {{
                 border-top: 4px solid #ffe600;
             }}
             .card.fabric {{
@@ -1141,17 +1143,17 @@ def home():
             </div>
 
             <div class="cards-grid">
-                <!-- Card 1: Joca Meli -->
-                <div class="card meli">
+                <!-- Card 1: Joca BigQuery -->
+                <div class="card bq">
                     <div>
                         <div class="card-header">
-                            <div class="card-title">🛒 Joca Meli</div>
-                            <span class="tag-pill tag-meli">BigQuery / Meli</span>
+                            <div class="card-title">🔍 Joca_BigQuery</div>
+                            <span class="tag-pill tag-bq">Google BigQuery Engine</span>
                         </div>
                         <div class="card-body">
-                            <p>Assistente executivo oficial para inteligência de vendas do Mercado Livre.</p>
+                            <p>Assistente executivo oficial para inteligência de vendas e análise no BigQuery.</p>
                             <div class="card-info-box">
-                                <div><span style="color:#64748b;">Bot:</span> <strong>@Joca_Meli_bot</strong></div>
+                                <div><span style="color:#64748b;">Bot:</span> <strong>Joca_BigQuery (@Joca_Meli_bot)</strong></div>
                                 <div><span style="color:#64748b;">Webhook:</span> <code>/webhook</code></div>
                                 <div><span style="color:#64748b;">Status:</span> <span style="color:#4ade80;">Ativo 🟢</span></div>
                             </div>
@@ -1173,7 +1175,7 @@ def home():
                         <div class="card-body">
                             <p>Assistente executivo integrado ao Lakehouse e Direct Lake no Microsoft Fabric.</p>
                             <div class="card-info-box">
-                                <div><span style="color:#64748b;">Bot:</span> <strong>@Joca_Meli_Fabric_bot</strong></div>
+                                <div><span style="color:#64748b;">Bot:</span> <strong>Joca_Fabric (@Joca_Meli_Fabric_bot)</strong></div>
                                 <div><span style="color:#64748b;">Webhook:</span> <code>/webhook_fabric</code></div>
                                 <div><span style="color:#64748b;">Status:</span> <span style="color:#4ade80;">Ativo 🟢</span></div>
                             </div>
@@ -1199,7 +1201,7 @@ def home():
 def status():
     return jsonify({
         "status": "online",
-        "versao": "2.8.0 - Dual Bot Hub + Rate Limiter Anti-Spam",
+        "versao": "2.9.0 - Dual Bot Hub (Joca_BigQuery + Joca_Fabric) + Rate Limiter Anti-Spam",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "total_conversas_registradas": len(carregar_conversas()),
@@ -1209,8 +1211,8 @@ def status():
             "limite_global_gemini_rpm": rate_limiter.max_global_gemini_rpm
         },
         "bots": {
-            "meli": "@Joca_Meli_bot",
-            "fabric": "@Joca_Meli_Fabric_bot"
+            "bigquery": "Joca_BigQuery (@Joca_Meli_bot)",
+            "fabric": "Joca_Fabric (@Joca_Meli_Fabric_bot)"
         }
     })
 
@@ -1236,10 +1238,10 @@ def webhook():
     if request.method == "GET":
         return f"""
         <html>
-        <head><title>Webhook Joca Meli</title></head>
+        <head><title>Webhook Joca_BigQuery</title></head>
         <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0b0f19; color: #fff;">
-            <h1>🛒 Webhook do Joca Meli está ATIVO! 🟢</h1>
-            <p style="color: #94a3b8; font-size: 16px; margin: 20px 0;">Endpoint oficial do robô <strong>@Joca_Meli_bot</strong> pronto para receber atualizações do Telegram.</p>
+            <h1>🔍 Webhook do Joca_BigQuery está ATIVO! 🟢</h1>
+            <p style="color: #94a3b8; font-size: 16px; margin: 20px 0;">Endpoint oficial do robô <strong>Joca_BigQuery</strong> pronto para receber atualizações do Telegram.</p>
             <p><a href="/" style="color: #38bdf8; text-decoration: none; font-weight: bold;">← Voltar para o Painel</a></p>
         </body>
         </html>
@@ -1252,7 +1254,7 @@ def webhook():
     msg = payload["message"]
     threading.Thread(
         target=_processar_mensagem_telegram, 
-        args=(msg, BASE_URL_MELI, "Meli Intelligence Bot"), 
+        args=(msg, BASE_URL_BQ, "Joca_BigQuery"), 
         daemon=True
     ).start()
 
@@ -1267,7 +1269,7 @@ def webhook_fabric():
         <head><title>Webhook Joca Fabric</title></head>
         <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0b0f19; color: #fff;">
             <h1>⚡ Webhook do Joca Fabric está ATIVO! 🟢</h1>
-            <p style="color: #94a3b8; font-size: 16px; margin: 20px 0;">Endpoint oficial do robô <strong>@Joca_Meli_Fabric_bot</strong> pronto para receber atualizações do Telegram.</p>
+            <p style="color: #94a3b8; font-size: 16px; margin: 20px 0;">Endpoint oficial do robô <strong>Joca_Fabric</strong> pronto para receber atualizações do Telegram.</p>
             <p><a href="/" style="color: #38bdf8; text-decoration: none; font-weight: bold;">← Voltar para o Painel</a></p>
         </body>
         </html>
@@ -1280,7 +1282,7 @@ def webhook_fabric():
     msg = payload["message"]
     threading.Thread(
         target=_processar_mensagem_telegram, 
-        args=(msg, BASE_URL_FABRIC, "Meli Intelligence Fabric"), 
+        args=(msg, BASE_URL_FABRIC, "Joca_Fabric"), 
         daemon=True
     ).start()
 
@@ -1292,7 +1294,7 @@ def set_webhook():
     host_url = request.host_url.replace("http://", "https://").rstrip("/")
     webhook_url = f"{host_url}/webhook"
     res = requests.post(f"{BASE_URL_MELI}/setWebhook", json={"url": webhook_url}).json()
-    return jsonify({"bot": "@Joca_Meli_bot", "telegram_response": res, "webhook_url": webhook_url})
+    return jsonify({"bot": "Joca_BigQuery (@Joca_Meli_bot)", "telegram_response": res, "webhook_url": webhook_url})
 
 
 @app.route("/set_webhook_fabric", methods=["GET"])
@@ -1300,7 +1302,7 @@ def set_webhook_fabric():
     host_url = request.host_url.replace("http://", "https://").rstrip("/")
     webhook_url = f"{host_url}/webhook_fabric"
     res = requests.post(f"{BASE_URL_FABRIC}/setWebhook", json={"url": webhook_url}).json()
-    return jsonify({"bot": "@Joca_Meli_Fabric_bot", "telegram_response": res, "webhook_url": webhook_url})
+    return jsonify({"bot": "Joca_Fabric (@Joca_Meli_Fabric_bot)", "telegram_response": res, "webhook_url": webhook_url})
 
 
 @app.route("/set_all_webhooks", methods=["GET"])
@@ -1312,8 +1314,8 @@ def set_all_webhooks():
     res_fabric = requests.post(f"{BASE_URL_FABRIC}/setWebhook", json={"url": wh_fabric}).json()
     return jsonify({
         "status": "success",
-        "joca_meli": {"bot": "@Joca_Meli_bot", "url": wh_meli, "response": res_meli},
-        "joca_fabric": {"bot": "@Joca_Meli_Fabric_bot", "url": wh_fabric, "response": res_fabric}
+        "joca_bigquery": {"bot": "Joca_BigQuery (@Joca_Meli_bot)", "url": wh_meli, "response": res_meli},
+        "joca_fabric": {"bot": "Joca_Fabric (@Joca_Meli_Fabric_bot)", "url": wh_fabric, "response": res_fabric}
     })
 
 
