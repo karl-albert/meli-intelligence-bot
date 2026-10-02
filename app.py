@@ -116,6 +116,65 @@ def salvar_conversa(registro):
         except Exception as e_s:
             logger.error(f"Erro ao salvar conversa em conversas_log.json: {e_s}")
 
+
+# ------------------------------------------------------------------------------
+# 3.1 SISTEMA DE PROTEÇÃO ANTI-SPAM & RATE LIMITER (FREE TIER SHIELD)
+# ------------------------------------------------------------------------------
+class RateLimiter:
+    """
+    Controlador de taxa de requisições:
+    1. Por usuário: máx 10 msgs/minuto e intervalo mínimo de 2s entre mensagens (anti-flood/bot).
+    2. Global Gemini: máx 13 requisições/minuto (protegendo a cota gratuita de 15 RPM do Gemini).
+    3. Proteção financeira: zero risco de cobrança acidental ou estouro de cota.
+    """
+    def __init__(self, max_per_user_per_min=10, min_interval_s=2.0, max_global_gemini_rpm=13):
+        self.lock = threading.Lock()
+        self.user_timestamps = {}   # {user_id: [t1, t2, ...]}
+        self.gemini_timestamps = []  # [t1, t2, ...]
+        self.max_per_user = max_per_user_per_min
+        self.min_interval = min_interval_s
+        self.max_global_gemini_rpm = max_global_gemini_rpm
+
+    def check_user_limit(self, user_id):
+        """Verifica se o usuário está enviando mensagens muito rápido."""
+        now = time.time()
+        with self.lock:
+            # Limpeza periódica de timestamps com mais de 2 minutos
+            for uid in list(self.user_timestamps.keys()):
+                self.user_timestamps[uid] = [t for t in self.user_timestamps[uid] if now - t < 120]
+                if not self.user_timestamps[uid]:
+                    del self.user_timestamps[uid]
+
+            timestamps = self.user_timestamps.get(user_id, [])
+
+            # 1. Checagem de intervalo mínimo (rajada/flood)
+            if timestamps and (now - timestamps[-1] < self.min_interval):
+                tempo_espera = max(1, int(self.min_interval - (now - timestamps[-1])) + 1)
+                return False, "flood_interval", tempo_espera
+
+            # 2. Checagem de limite por minuto
+            timestamps_min = [t for t in timestamps if now - t < 60]
+            if len(timestamps_min) >= self.max_per_user:
+                tempo_espera = max(1, int(60 - (now - timestamps_min[0])))
+                return False, "max_per_minute", tempo_espera
+
+            # Permissão concedida: registra chamada
+            timestamps.append(now)
+            self.user_timestamps[user_id] = timestamps
+            return True, None, 0
+
+    def can_call_gemini(self):
+        """Verifica se o limite global de segurança do Gemini (13 RPM) foi atingido."""
+        now = time.time()
+        with self.lock:
+            self.gemini_timestamps = [t for t in self.gemini_timestamps if now - t < 60]
+            if len(self.gemini_timestamps) >= self.max_global_gemini_rpm:
+                return False
+            self.gemini_timestamps.append(now)
+            return True
+
+rate_limiter = RateLimiter(max_per_user_per_min=10, min_interval_s=2.0, max_global_gemini_rpm=13)
+
 con = duckdb.connect()
 
 data_recente = None
@@ -157,6 +216,9 @@ recarregar_duckdb()
 # 4. FUNÇÕES DE SUPORTE A IA (GEMINI)
 # ==============================================================================
 def chamar_gemini(prompt):
+    if not rate_limiter.can_call_gemini():
+        logger.warning("Limite global de segurança Gemini (13 RPM) atingido. Ativando fallback determinístico local.")
+        return None
     for model_name in AVAILABLE_MODELS:
         try:
             m = genai.GenerativeModel(model_name)
@@ -307,8 +369,52 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
     """Executado em segundo plano (background thread) para eliminar timeouts no Telegram"""
     try:
         chat_id = msg.get("chat", {}).get("id")
-        user_name = msg.get("from", {}).get("first_name", "Parceiro")
+        user_obj = msg.get("from", {})
+        user_id = user_obj.get("id") or chat_id
+        user_name = user_obj.get("first_name", "Parceiro")
         if not chat_id:
+            return
+
+        # ----------------------------------------------------------------------
+        # VALIDAÇÃO DE SEGURANÇA E RATE LIMITING ANTI-SPAM
+        # ----------------------------------------------------------------------
+        permitido, motivo, espera_s = rate_limiter.check_user_limit(user_id)
+        if not permitido:
+            logger.warning(f"Rate limit acionado para {user_name} (ID {user_id}). Motivo: {motivo}")
+            aviso_spam = (
+                f"⏳ *Calma lá, {user_name}!* 🚦\n\n"
+                f"Você está enviando perguntas muito rápido. Para mantermos a estabilidade e a gratuidade do serviço, "
+                f"por favor aguarde cerca de *{espera_s} segundos* antes de enviar sua próxima dúvida."
+            )
+            enviar_mensagem(chat_id, aviso_spam, base_url=base_url)
+
+            # Grava o evento na telemetria das conversas para auditoria no Power BI
+            try:
+                p_nome = user_obj.get("first_name", "")
+                u_nome = user_obj.get("last_name", "")
+                nome_completo = f"{p_nome} {u_nome}".strip() or user_name
+                username_val = user_obj.get("username", "")
+                username_str = f"@{username_val}" if username_val else "-"
+                agora = datetime.now()
+                bot_tag = "Joca Meli" if "Meli Intelligence Bot" in bot_label else "Joca Fabric"
+                
+                salvar_conversa({
+                    "id": msg.get("message_id") or int(time.time()),
+                    "data_hora": agora.strftime("%Y-%m-%d %H:%M:%S"),
+                    "data": agora.strftime("%Y-%m-%d"),
+                    "hora": agora.strftime("%H:%M:%S"),
+                    "bot": bot_tag,
+                    "chat_id": str(chat_id),
+                    "usuario": nome_completo,
+                    "username": username_str,
+                    "tipo_entrada": "Spam/Bloqueado",
+                    "pergunta": msg.get("text") or "[Mídia Bloqueada por Flood]",
+                    "resposta": aviso_spam,
+                    "tempo_resposta_s": 0.05,
+                    "status": "Bloqueado (Anti-Spam)"
+                })
+            except Exception as e_log_spam:
+                logger.error(f"Erro ao registrar spam na telemetria: {e_log_spam}")
             return
 
         texto, origem_audio = None, False
@@ -1093,10 +1199,15 @@ def home():
 def status():
     return jsonify({
         "status": "online",
-        "versao": "2.7.0 - Dual Bot Hub + Power BI Telemetry",
+        "versao": "2.8.0 - Dual Bot Hub + Rate Limiter Anti-Spam",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "total_conversas_registradas": len(carregar_conversas()),
+        "anti_spam": {
+            "max_por_usuario_min": rate_limiter.max_per_user,
+            "intervalo_min_segundos": rate_limiter.min_interval,
+            "limite_global_gemini_rpm": rate_limiter.max_global_gemini_rpm
+        },
         "bots": {
             "meli": "@Joca_Meli_bot",
             "fabric": "@Joca_Meli_Fabric_bot"
