@@ -17,9 +17,11 @@ import base64
 import asyncio
 import io
 import re
+import threading
 from datetime import datetime, timedelta
 from flask import Flask, request, jsonify
 import google.generativeai as genai
+
 
 # ==============================================================================
 # 1. CONFIGURAÇÕES DE LOG E FLASK
@@ -32,19 +34,28 @@ app = Flask(__name__)
 # ==============================================================================
 # 2. CREDENCIAIS E TOKENS (BASE64 E VARIÁVEIS DE AMBIENTE)
 # ==============================================================================
-_B64_TOK = "ODkxNjczMzY3MTpBQUgxaHR2ZDZWcURLc25nZHlZc0ZPYVhkdk5nVVEwUmp5TQ=="
+_B64_TOK_MELI = "ODkxNjczMzY3MTpBQUgxaHR2ZDZWcURLc25nZHlZc0ZPYVhkdk5nVVEwUmp5TQ=="
+_B64_TOK_FABRIC = "ODk1ODUyNTM2MzpBQUgwUkQwbDhlWHZyZTFZeTJYVE90VkxuT0FCOGx1UWRoRQ=="
 _B64_GEM = "QVEuQWI4Uk42S3RWbzR3RkhZTVA4a3FiMXplWXo2dmRTLVRrakd3ZG1yY18xbzY4MURuUUE="
 
 FALLBACK_KEY = base64.b64decode(_B64_GEM).decode("utf-8").strip()
-FALLBACK_TOKEN = base64.b64decode(_B64_TOK).decode("utf-8").strip()
+FALLBACK_TOKEN_MELI = base64.b64decode(_B64_TOK_MELI).decode("utf-8").strip()
+FALLBACK_TOKEN_FABRIC = base64.b64decode(_B64_TOK_FABRIC).decode("utf-8").strip()
 
 env_key = os.environ.get("GEMINI_KEY", "").strip()
 GEMINI_KEY = env_key if (env_key and len(env_key) > 20) else FALLBACK_KEY
 
 env_token = os.environ.get("TELEGRAM_TOKEN", "").strip()
-TOKEN = env_token if (env_token and len(env_token) > 20) else FALLBACK_TOKEN
+TOKEN_MELI = env_token if (env_token and len(env_token) > 20) else FALLBACK_TOKEN_MELI
 
-BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN}"
+env_token_fabric = os.environ.get("TELEGRAM_TOKEN_FABRIC", "").strip()
+TOKEN_FABRIC = env_token_fabric if (env_token_fabric and len(env_token_fabric) > 20) else FALLBACK_TOKEN_FABRIC
+
+# Configuração e Retrocompatibilidade
+TOKEN = TOKEN_MELI
+BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN_MELI}"
+BASE_URL_MELI = f"https://api.telegram.org/bot{TOKEN_MELI}"
+BASE_URL_FABRIC = f"https://api.telegram.org/bot{TOKEN_FABRIC}"
 
 # Configurar Google Gemini
 genai.configure(api_key=GEMINI_KEY)
@@ -188,11 +199,13 @@ Regras obrigatórias:
 
 
 # ==============================================================================
-# 5. COMUNICAÇÃO COM O TELEGRAM (MENSAGENS E VOZ)
+# 5. COMUNICAÇÃO COM O TELEGRAM (MENSAGENS, VOZ E PROCESSAMENTO ASSÍNCRONO)
 # ==============================================================================
-def enviar_mensagem(chat_id, texto):
+def enviar_mensagem(chat_id, texto, base_url=None):
+    if not base_url:
+        base_url = BASE_URL_MELI
     try:
-        url = f"{BASE_TELEGRAM_URL}/sendMessage"
+        url = f"{base_url}/sendMessage"
         payload = {
             "chat_id": chat_id,
             "text": texto,
@@ -205,7 +218,7 @@ def enviar_mensagem(chat_id, texto):
             res = requests.post(url, json=payload, timeout=10)
         return True
     except Exception as e:
-        logger.error(f"Erro ao enviar para Telegram: {e}")
+        logger.error(f"Erro ao enviar para Telegram ({base_url}): {e}")
         return False
 
 
@@ -219,8 +232,10 @@ async def _sintetizar_edge(texto):
     return bytes(chunks)
 
 
-def enviar_voz(chat_id, texto_fala):
+def enviar_voz(chat_id, texto_fala, base_url=None):
     """Sintetiza e envia áudio via Edge-TTS (Masculino) ou gTTS (Fallback)"""
+    if not base_url:
+        base_url = BASE_URL_MELI
     try:
         audio_data = None
         try:
@@ -237,18 +252,18 @@ def enviar_voz(chat_id, texto_fala):
             fp.seek(0)
             audio_data = fp.getvalue()
 
-        url_voice = f"{BASE_TELEGRAM_URL}/sendVoice"
+        url_voice = f"{base_url}/sendVoice"
         files_voice = {"voice": ("joca_voz.mp3", audio_data, "audio/mpeg")}
         res_v = requests.post(url_voice, data={"chat_id": chat_id}, files=files_voice, timeout=25)
         if res_v.status_code == 200 and res_v.json().get("ok"):
             logger.info(f"Nota de voz enviada com sucesso para chat {chat_id}")
             return True
             
-        url_audio = f"{BASE_TELEGRAM_URL}/sendAudio"
+        url_audio = f"{base_url}/sendAudio"
         files_audio = {"audio": ("joca_audio.mp3", audio_data, "audio/mpeg")}
         res_a = requests.post(
             url_audio, 
-            data={"chat_id": chat_id, "title": "Joca Responde", "performer": "Joca Meli Bot"}, 
+            data={"chat_id": chat_id, "title": "Joca Responde", "performer": "Joca Assistente"}, 
             files=files_audio, 
             timeout=25
         )
@@ -256,6 +271,66 @@ def enviar_voz(chat_id, texto_fala):
     except Exception as e:
         logger.error(f"Erro ao sintetizar/enviar áudio para Telegram: {e}")
         return False
+
+
+def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
+    """Executado em segundo plano (background thread) para eliminar timeouts no Telegram"""
+    try:
+        chat_id = msg.get("chat", {}).get("id")
+        user_name = msg.get("from", {}).get("first_name", "Parceiro")
+        if not chat_id:
+            return
+
+        texto, origem_audio = None, False
+
+        # Tratamento de voz recebida
+        if "voice" in msg or "audio" in msg:
+            media_obj = msg.get("voice") or msg.get("audio")
+            file_id = media_obj.get("file_id")
+            mime_type = media_obj.get("mime_type", "audio/ogg")
+            try:
+                requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "record_voice"}, timeout=5)
+                get_f = requests.get(f"{base_url}/getFile?file_id={file_id}", timeout=10).json()
+                if get_f.get("ok"):
+                    f_path = get_f["result"]["file_path"]
+                    token_part = base_url.split("/bot")[-1]
+                    dl_url = f"https://api.telegram.org/file/bot{token_part}/{f_path}"
+                    audio_bytes = requests.get(dl_url, timeout=20).content
+                    texto = transcrever_audio(audio_bytes, mime_type)
+                    origem_audio = True
+            except Exception as e_audio:
+                logger.error(f"Erro ao processar áudio recebido: {e_audio}")
+                enviar_mensagem(chat_id, "🎙️ Não consegui ouvir seu áudio com clareza. Poderia repetir ou digitar?", base_url=base_url)
+                return
+
+        elif "text" in msg:
+            texto = msg["text"]
+
+        if not texto:
+            return
+
+        requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "typing"}, timeout=5)
+
+        resposta = processar_pergunta(texto, user_name) or (
+            f"🤖 *{bot_label}*\n"
+            f"Não consegui processar a consulta para: _\"{texto}\"_\n\n"
+            f"Tente reformular, por exemplo:\n"
+            f"• *\"Total de vendas no MTD\"*\n"
+            f"• *\"Faturamento de hoje por categoria\"*"
+        )
+
+        enviar_mensagem(chat_id, resposta, base_url=base_url)
+
+        quer_audio = origem_audio or any(w in texto.lower() for w in ["áudio", "audio", "por voz", "fale", "mande áudio", "voz"])
+        if quer_audio:
+            try:
+                requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "record_voice"}, timeout=5)
+                fala = gerar_roteiro_fala(resposta, user_name)
+                enviar_voz(chat_id, fala, base_url=base_url)
+            except Exception as e_voz:
+                logger.error(f"Erro ao gerar/enviar voz de resposta: {e_voz}")
+    except Exception as e_proc:
+        logger.error(f"Erro crítico no processamento assíncrono: {e_proc}")
 
 
 # ==============================================================================
@@ -661,104 +736,396 @@ Formate uma resposta executiva impecável para o Telegram:
 # ==============================================================================
 # 7. ROTAS FLASK (ENDPOINTS DA APLICAÇÃO NO RENDER)
 # ==============================================================================
+# ==============================================================================
+# 7. ROTAS FLASK (ENDPOINTS DA APLICAÇÃO NO RENDER - DUAL BOT HUB)
+# ==============================================================================
 @app.route("/", methods=["GET"])
 def home():
     return f"""
-    <html>
-    <head><title>Meli Intelligence Bot</title></head>
-    <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px; background: #f8fafc;">
-        <h1 style="color: #0f172a;">🤖 Meli Intelligence Bot está ONLINE!</h1>
-        <p style="font-size: 18px; color: #475569;">Rodando 24/7 na nuvem gratuita do Render.com</p>
-        <div style="background: white; max-width: 500px; margin: 20px auto; padding: 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);">
-            <p><strong>Status:</strong> Ativo 🟢</p>
-            <p><strong>Registros Carregados:</strong> {total_registros:,}</p>
-            <p><strong>Data de Referência:</strong> {data_recente}</p>
-            <p><strong>Telegram:</strong> <a href="https://t.me/Joca_Meli_bot" target="_blank">@Joca_Meli_bot</a></p>
+    <!DOCTYPE html>
+    <html lang="pt-br">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Central de Inteligência • Joca Bots 24/7</title>
+        <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+        <style>
+            * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+            body {{
+                font-family: 'Plus Jakarta Sans', sans-serif;
+                background: linear-gradient(135deg, #0b0f19 0%, #111827 50%, #0b0f19 100%);
+                color: #e2e8f0;
+                min-height: 100vh;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                padding: 40px 20px;
+            }}
+            .container {{
+                max-width: 960px;
+                width: 100%;
+            }}
+            .header {{
+                text-align: center;
+                margin-bottom: 35px;
+            }}
+            .badge-live {{
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                background: rgba(34, 197, 94, 0.15);
+                border: 1px solid rgba(34, 197, 94, 0.35);
+                color: #4ade80;
+                padding: 6px 16px;
+                border-radius: 999px;
+                font-size: 13px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                margin-bottom: 16px;
+            }}
+            .dot {{
+                width: 8px;
+                height: 8px;
+                background: #22c55e;
+                border-radius: 50%;
+                box-shadow: 0 0 10px #22c55e;
+            }}
+            h1 {{
+                font-size: 32px;
+                font-weight: 800;
+                color: #ffffff;
+                letter-spacing: -0.5px;
+                margin-bottom: 8px;
+            }}
+            .subtitle {{
+                font-size: 16px;
+                color: #94a3b8;
+            }}
+            .meta-bar {{
+                background: rgba(255, 255, 255, 0.04);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 16px;
+                padding: 16px 24px;
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: space-around;
+                align-items: center;
+                gap: 15px;
+                margin-bottom: 30px;
+                backdrop-filter: blur(10px);
+            }}
+            .meta-item {{
+                text-align: center;
+            }}
+            .meta-label {{
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.8px;
+                color: #64748b;
+                margin-bottom: 4px;
+                font-weight: 600;
+            }}
+            .meta-val {{
+                font-size: 16px;
+                font-weight: 700;
+                color: #f1f5f9;
+            }}
+            .cards-grid {{
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+                gap: 25px;
+                margin-bottom: 30px;
+            }}
+            .card {{
+                background: rgba(30, 41, 59, 0.6);
+                border: 1px solid rgba(255, 255, 255, 0.08);
+                border-radius: 20px;
+                padding: 28px;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                backdrop-filter: blur(10px);
+                transition: transform 0.2s ease, border-color 0.2s ease;
+            }}
+            .card:hover {{
+                transform: translateY(-4px);
+                border-color: rgba(255, 255, 255, 0.2);
+            }}
+            .card.meli {{
+                border-top: 4px solid #ffe600;
+            }}
+            .card.fabric {{
+                border-top: 4px solid #0284c7;
+            }}
+            .card-header {{
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                margin-bottom: 20px;
+            }}
+            .card-title {{
+                font-size: 22px;
+                font-weight: 700;
+                color: #ffffff;
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }}
+            .tag-pill {{
+                font-size: 11px;
+                font-weight: 700;
+                padding: 4px 10px;
+                border-radius: 999px;
+            }}
+            .tag-meli {{ background: rgba(255, 230, 0, 0.15); color: #ffe600; border: 1px solid rgba(255, 230, 0, 0.3); }}
+            .tag-fabric {{ background: rgba(2, 132, 199, 0.15); color: #38bdf8; border: 1px solid rgba(2, 132, 199, 0.3); }}
+            .card-body p {{
+                font-size: 14px;
+                color: #94a3b8;
+                margin-bottom: 12px;
+                line-height: 1.5;
+            }}
+            .card-info-box {{
+                background: rgba(15, 23, 42, 0.6);
+                border-radius: 12px;
+                padding: 12px 16px;
+                margin-bottom: 20px;
+                font-size: 13px;
+            }}
+            .card-info-box div {{
+                display: flex;
+                justify-content: space-between;
+                margin-bottom: 6px;
+            }}
+            .card-info-box div:last-child {{ margin-bottom: 0; }}
+            .btn-group {{
+                display: flex;
+                gap: 10px;
+            }}
+            .btn {{
+                flex: 1;
+                text-align: center;
+                padding: 11px 16px;
+                border-radius: 10px;
+                text-decoration: none;
+                font-size: 13px;
+                font-weight: 700;
+                transition: all 0.2s ease;
+                display: inline-block;
+            }}
+            .btn-tg {{
+                background: #0088cc;
+                color: white;
+            }}
+            .btn-tg:hover {{ background: #0099e6; }}
+            .btn-wh {{
+                background: rgba(255, 255, 255, 0.08);
+                color: #e2e8f0;
+                border: 1px solid rgba(255, 255, 255, 0.15);
+            }}
+            .btn-wh:hover {{ background: rgba(255, 255, 255, 0.15); color: white; }}
+            .footer-actions {{
+                text-align: center;
+            }}
+            .btn-all {{
+                background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+                color: white;
+                padding: 14px 32px;
+                border-radius: 12px;
+                text-decoration: none;
+                font-weight: 700;
+                font-size: 15px;
+                box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.4);
+                display: inline-block;
+            }}
+            .btn-all:hover {{
+                box-shadow: 0 12px 30px -5px rgba(37, 99, 235, 0.6);
+                transform: translateY(-2px);
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <div class="badge-live"><span class="dot"></span> SERVIDOR NUVEM ATIVO (RENDER 24/7)</div>
+                <h1>Central de Inteligência • Joca Bots</h1>
+                <p class="subtitle">Canal Conversacional com Inteligência Artificial Generativa (Google Gemini + DuckDB)</p>
+            </div>
+
+            <div class="meta-bar">
+                <div class="meta-item">
+                    <div class="meta-label">Motor de Dados</div>
+                    <div class="meta-val">DuckDB + Parquet</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Total de Registros</div>
+                    <div class="meta-val">{total_registros:,}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Data de Referência</div>
+                    <div class="meta-val">{data_recente}</div>
+                </div>
+                <div class="meta-item">
+                    <div class="meta-label">Arquitetura</div>
+                    <div class="meta-val">Dual Webhook Híbrido</div>
+                </div>
+            </div>
+
+            <div class="cards-grid">
+                <!-- Card 1: Joca Meli -->
+                <div class="card meli">
+                    <div>
+                        <div class="card-header">
+                            <div class="card-title">🛒 Joca Meli</div>
+                            <span class="tag-pill tag-meli">BigQuery / Meli</span>
+                        </div>
+                        <div class="card-body">
+                            <p>Assistente executivo oficial para inteligência de vendas do Mercado Livre.</p>
+                            <div class="card-info-box">
+                                <div><span style="color:#64748b;">Bot:</span> <strong>@Joca_Meli_bot</strong></div>
+                                <div><span style="color:#64748b;">Webhook:</span> <code>/webhook</code></div>
+                                <div><span style="color:#64748b;">Status:</span> <span style="color:#4ade80;">Ativo 🟢</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="btn-group">
+                        <a href="https://t.me/Joca_Meli_bot" target="_blank" class="btn btn-tg">Abrir no Telegram</a>
+                        <a href="/set_webhook" class="btn btn-wh">Ativar Webhook</a>
+                    </div>
+                </div>
+
+                <!-- Card 2: Joca Fabric -->
+                <div class="card fabric">
+                    <div>
+                        <div class="card-header">
+                            <div class="card-title">⚡ Joca Fabric</div>
+                            <span class="tag-pill tag-fabric">Microsoft Fabric Direct Lake</span>
+                        </div>
+                        <div class="card-body">
+                            <p>Assistente executivo integrado ao Lakehouse e Direct Lake no Microsoft Fabric.</p>
+                            <div class="card-info-box">
+                                <div><span style="color:#64748b;">Bot:</span> <strong>@Joca_Meli_Fabric_bot</strong></div>
+                                <div><span style="color:#64748b;">Webhook:</span> <code>/webhook_fabric</code></div>
+                                <div><span style="color:#64748b;">Status:</span> <span style="color:#4ade80;">Ativo 🟢</span></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="btn-group">
+                        <a href="https://t.me/Joca_Meli_Fabric_bot" target="_blank" class="btn btn-tg">Abrir no Telegram</a>
+                        <a href="/set_webhook_fabric" class="btn btn-wh">Ativar Webhook</a>
+                    </div>
+                </div>
+            </div>
+
+            <div class="footer-actions">
+                <a href="/set_all_webhooks" class="btn-all">⚡ Ativar / Renovar Ambos os Webhooks na Nuvem</a>
+            </div>
         </div>
-        <p><a href="/set_webhook" style="background: #2563eb; color: white; padding: 10px 20px; border-radius: 8px; text-decoration: none;">Configurar Webhook no Telegram</a></p>
     </body>
     </html>
     """
+
 
 @app.route("/status", methods=["GET"])
 def status():
     return jsonify({
         "status": "online",
-        "versao": "2.5.0 - Dicionario de Dados Oficial Integrado",
+        "versao": "2.6.0 - Dual Bot Hub (Meli + Fabric)",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
-        "bot": "@Joca_Meli_bot"
+        "bots": {
+            "meli": "@Joca_Meli_bot",
+            "fabric": "@Joca_Meli_Fabric_bot"
+        }
     })
 
-@app.route("/webhook", methods=["POST"])
+
+@app.route("/webhook", methods=["GET", "POST"])
 def webhook():
+    if request.method == "GET":
+        return f"""
+        <html>
+        <head><title>Webhook Joca Meli</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0b0f19; color: #fff;">
+            <h1>🛒 Webhook do Joca Meli está ATIVO! 🟢</h1>
+            <p style="color: #94a3b8; font-size: 16px; margin: 20px 0;">Endpoint oficial do robô <strong>@Joca_Meli_bot</strong> pronto para receber atualizações do Telegram.</p>
+            <p><a href="/" style="color: #38bdf8; text-decoration: none; font-weight: bold;">← Voltar para o Painel</a></p>
+        </body>
+        </html>
+        """
+
     payload = request.get_json(silent=True)
     if not payload or "message" not in payload:
         return jsonify({"status": "no payload/message"}), 200
 
     msg = payload["message"]
-    chat_id = msg.get("chat", {}).get("id")
-    user_name = msg.get("from", {}).get("first_name", "Parceiro")
-    
-    if not chat_id:
-        return jsonify({"status": "no chat_id"}), 200
+    threading.Thread(
+        target=_processar_mensagem_telegram, 
+        args=(msg, BASE_URL_MELI, "Meli Intelligence Bot"), 
+        daemon=True
+    ).start()
 
-    texto, origem_audio = None, False
+    return jsonify({"status": "received"}), 200
 
-    # Tratamento de voz recebida
-    if "voice" in msg or "audio" in msg:
-        media_obj = msg.get("voice") or msg.get("audio")
-        file_id = media_obj.get("file_id")
-        mime_type = media_obj.get("mime_type", "audio/ogg")
-        try:
-            requests.post(f"{BASE_TELEGRAM_URL}/sendChatAction", json={"chat_id": chat_id, "action": "record_voice"}, timeout=5)
-            get_f = requests.get(f"{BASE_TELEGRAM_URL}/getFile?file_id={file_id}", timeout=10).json()
-            if get_f.get("ok"):
-                f_path = get_f["result"]["file_path"]
-                dl_url = f"https://api.telegram.org/file/bot{TOKEN}/{f_path}"
-                audio_bytes = requests.get(dl_url, timeout=20).content
-                texto = transcrever_audio(audio_bytes, mime_type)
-                origem_audio = True
-        except Exception as e_audio:
-            logger.error(f"Erro ao processar áudio recebido: {e_audio}")
-            enviar_mensagem(chat_id, "🎙️ Não consegui ouvir seu áudio com clareza. Poderia repetir ou digitar?")
-            return jsonify({"status": "audio error"}), 200
 
-    elif "text" in msg:
-        texto = msg["text"]
+@app.route("/webhook_fabric", methods=["GET", "POST"])
+def webhook_fabric():
+    if request.method == "GET":
+        return f"""
+        <html>
+        <head><title>Webhook Joca Fabric</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0b0f19; color: #fff;">
+            <h1>⚡ Webhook do Joca Fabric está ATIVO! 🟢</h1>
+            <p style="color: #94a3b8; font-size: 16px; margin: 20px 0;">Endpoint oficial do robô <strong>@Joca_Meli_Fabric_bot</strong> pronto para receber atualizações do Telegram.</p>
+            <p><a href="/" style="color: #38bdf8; text-decoration: none; font-weight: bold;">← Voltar para o Painel</a></p>
+        </body>
+        </html>
+        """
 
-    if not texto:
-        return jsonify({"status": "no text to process"}), 200
+    payload = request.get_json(silent=True)
+    if not payload or "message" not in payload:
+        return jsonify({"status": "no payload/message"}), 200
 
-    resposta = processar_pergunta(texto, user_name) or (
-        f"🤖 *Meli Intelligence Bot*\n"
-        f"Não consegui processar a consulta para: _\"{texto}\"_\n\n"
-        f"Tente reformular, por exemplo:\n"
-        f"• *\"Total de vendas no MTD\"*\n"
-        f"• *\"Faturamento de hoje por categoria\"*"
-    )
+    msg = payload["message"]
+    threading.Thread(
+        target=_processar_mensagem_telegram, 
+        args=(msg, BASE_URL_FABRIC, "Meli Intelligence Fabric"), 
+        daemon=True
+    ).start()
 
-    # Envia resposta textual
-    enviar_mensagem(chat_id, resposta)
-    
-    # Envia resposta em voz se solicitado ou se veio por áudio
-    quer_audio = origem_audio or any(w in texto.lower() for w in ["áudio", "audio", "por voz", "fale", "mande áudio", "voz"])
-    if quer_audio:
-        try:
-            requests.post(f"{BASE_TELEGRAM_URL}/sendChatAction", json={"chat_id": chat_id, "action": "record_voice"}, timeout=5)
-            fala = gerar_roteiro_fala(resposta, user_name)
-            enviar_voz(chat_id, fala)
-        except Exception as e_voz:
-            logger.error(f"Erro ao gerar/enviar voz de resposta: {e_voz}")
+    return jsonify({"status": "received"}), 200
 
-    return jsonify({"status": "success"}), 200
 
 @app.route("/set_webhook", methods=["GET"])
 def set_webhook():
     host_url = request.host_url.replace("http://", "https://").rstrip("/")
     webhook_url = f"{host_url}/webhook"
-    res = requests.post(f"{BASE_TELEGRAM_URL}/setWebhook", json={"url": webhook_url}).json()
-    return jsonify({"telegram_response": res, "webhook_url": webhook_url})
+    res = requests.post(f"{BASE_URL_MELI}/setWebhook", json={"url": webhook_url}).json()
+    return jsonify({"bot": "@Joca_Meli_bot", "telegram_response": res, "webhook_url": webhook_url})
+
+
+@app.route("/set_webhook_fabric", methods=["GET"])
+def set_webhook_fabric():
+    host_url = request.host_url.replace("http://", "https://").rstrip("/")
+    webhook_url = f"{host_url}/webhook_fabric"
+    res = requests.post(f"{BASE_URL_FABRIC}/setWebhook", json={"url": webhook_url}).json()
+    return jsonify({"bot": "@Joca_Meli_Fabric_bot", "telegram_response": res, "webhook_url": webhook_url})
+
+
+@app.route("/set_all_webhooks", methods=["GET"])
+def set_all_webhooks():
+    host_url = request.host_url.replace("http://", "https://").rstrip("/")
+    wh_meli = f"{host_url}/webhook"
+    wh_fabric = f"{host_url}/webhook_fabric"
+    res_meli = requests.post(f"{BASE_URL_MELI}/setWebhook", json={"url": wh_meli}).json()
+    res_fabric = requests.post(f"{BASE_URL_FABRIC}/setWebhook", json={"url": wh_fabric}).json()
+    return jsonify({
+        "status": "success",
+        "joca_meli": {"bot": "@Joca_Meli_bot", "url": wh_meli, "response": res_meli},
+        "joca_fabric": {"bot": "@Joca_Meli_Fabric_bot", "url": wh_fabric, "response": res_fabric}
+    })
+
 
 @app.route("/debug_gemini", methods=["GET"])
 def debug_gemini():
