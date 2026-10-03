@@ -1495,11 +1495,13 @@ def _tratar_pilar_1_indices(texto):
                     var_pct = ((p0 - p1) / p1) * 100.0 if p1 > 0 else 0.0
                     emoji = "🟢" if var_pct >= 0 else "🔴"
                     dt_str = r0[0].strftime("%d/%m/%Y") if hasattr(r0[0], "strftime") else str(r0[0])
+                    p0_fmt = f"{p0:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    min_fmt = f"{r0[4]:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                    max_fmt = f"{r0[5]:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
                     return (
-                        f"📊 **{r0[1]} ({r0[2]}) — Pregão de {dt_str}**\n"
-                        f"• **Pontuação / Valor:** {p0:,.2f} ({emoji} {var_pct:+.2f}%)\n"
-                        f"• **Faixa do Dia:** Mín: {r0[4]:,.2f} | Máx: {r0[5]:,.2f}\n"
-                        f"📌 *Dados oficiais da tabela Fato_Indices_Americanos. Índices não possuem volume.*"
+                        f"📊 **{r0[1]} ({r0[2]}) | Pregão de {dt_str}**<br/><br/>\n"
+                        f"• **Fechamento:** {p0_fmt} pts ({emoji} {var_pct:+.2f}%)<br/><br/>\n"
+                        f"• **Mín:** {min_fmt} pts | **Máx:** {max_fmt} pts 📌"
                     )
 
         r = con.execute("SELECT data, fechamento, variacao, minima, maxima FROM fato_b3_ibov ORDER BY data DESC LIMIT 1").fetchone()
@@ -1513,14 +1515,17 @@ def _tratar_pilar_1_indices(texto):
         max_p = r[4]
         emoji = "🟢" if var >= 0 else "🔴"
 
+        fech_fmt = f"{fech:,.0f}".replace(",", ".")
+        min_fmt = f"{min_p:,.0f}".replace(",", ".")
+        max_fmt = f"{max_p:,.0f}".replace(",", ".")
+
         return (
-            f"📊 **Índice Ibovespa (^BVSP) — Pregão de {dt_str}**\n"
-            f"• **Pontuação:** {fech:,.0f} pts ({emoji} {var:+.2f}%)\n"
-            f"• **Faixa do Dia:** Mín: {min_p:,.0f} pts | Máx: {max_p:,.0f} pts\n"
-            f"📌 *Dados consolidados na base oficial do Painel B3 (Fato_B3_ibov). Índices não possuem volume.*\n\n"
-            f"💡 *Deseja consultar algum índice internacional do painel?*\n"
-            f"Basta digitar: **Dow Jones**, **Nasdaq**, **NYSE**, **Petróleo Brent** ou **OMXS30**."
-        ).replace(",", ".")
+            f"📊 **Índice Ibovespa (^BVSP) | Pregão de {dt_str}**<br/><br/>\n"
+            f"• **Fechamento:** {fech_fmt} pts ({emoji} {var:+.2f}%)<br/><br/>\n"
+            f"• **Mín:** {min_fmt} pts | **Máx:** {max_fmt} pts 📌<br/><br/>\n"
+            f"💡 Deseja consultar algum índice internacional do painel?<br/>\n"
+            f"Basta digitar: **Dow Jones. Nasdaq. NYSE. Petróleo Brent ou OMXS30.**"
+        )
     finally:
         con.close()
 
