@@ -1335,13 +1335,14 @@ def set_all_webhooks():
 # JOCA B3 - CANAL CORPORATIVO MICROSOFT TEAMS (BOLSA B3 & MACROECONOMIA)
 # ==============================================================================
 _teams_token_cache = {"token": None, "expires_at": 0}
+TEAMS_TENANT_ID = os.environ.get("TEAMS_TENANT_ID", "d62891e4-d7fd-4035-be5e-56f56edcc459")
 
 def obter_token_teams():
     now = time.time()
     if _teams_token_cache["token"] and now < _teams_token_cache["expires_at"]:
         return _teams_token_cache["token"]
     
-    url = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
+    url = f"https://login.microsoftonline.com/{TEAMS_TENANT_ID}/oauth2/v2.0/token"
     data = {
         "grant_type": "client_credentials",
         "client_id": TEAMS_BOT_ID,
