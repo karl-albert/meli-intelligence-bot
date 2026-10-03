@@ -1453,7 +1453,18 @@ def obter_dados_mercado_b3(texto):
             prev = meta.get("chartPreviousClose")
             var = ((p - prev) / prev) * 100 if prev else 0.0
             emoji = "🟢" if var >= 0 else "🔴"
-            info.append(f"• **{tick} (Ação B3):** R$ {p:.2f} ({emoji} {var:+.2f}%)".replace(".", ","))
+            
+            vol = meta.get("regularMarketVolume", 0) or 0
+            vol_fin = (p * vol) if (p and vol) else 0
+            vol_fin_str = f"R$ {vol_fin / 1e9:.2f} bi" if vol_fin >= 1e9 else (f"R$ {vol_fin / 1e6:.1f} mi" if vol_fin > 0 else "N/D")
+            vol_pap_str = f"{vol / 1e6:.1f}M papéis" if vol >= 1e6 else (f"{vol:,.0f} papéis" if vol > 0 else "")
+            vol_display = f"{vol_fin_str} ({vol_pap_str})" if vol_pap_str else vol_fin_str
+            
+            d_low = meta.get("regularMarketDayLow")
+            d_high = meta.get("regularMarketDayHigh")
+            range_str = f" | Mín: R$ {d_low:.2f} - Máx: R$ {d_high:.2f}" if (d_low and d_high) else ""
+            
+            info.append(f"• **{tick}:** R$ {p:.2f} ({emoji} {var:+.2f}%) | Vol: {vol_display}{range_str}")
         except Exception:
             pass
 
@@ -1463,20 +1474,22 @@ def obter_dados_mercado_b3(texto):
 def processar_pergunta_b3(texto, user_name="Karl"):
     dados_mercado = obter_dados_mercado_b3(texto)
     
-    prompt = f"""Você é o Joca B3, consultor executivo de inteligência e analytics do mercado financeiro e da B3 (Brasil, Bolsa, Balcão) integrado ao Microsoft Teams.
-Você presta consultoria executiva, rápida e analítica sobre a bolsa brasileira, cotações de ações, Ibovespa, Dólar e macroeconomia (Selic 10,50%, IPCA, câmbio).
+    prompt = f"""Você é o Joca B3, consultor executivo de inteligência e analytics de mercado da B3 no Microsoft Teams.
 
 USUÁRIO: {user_name}
 PERGUNTA: "{texto}"
 
-DADOS EM TEMPO REAL CAPTURADOS DA B3/MERCADO AGORA:
-{dados_mercado if dados_mercado else "Nenhum ticker ou índice específico detectado na consulta rápida."}
+DADOS EM TEMPO REAL:
+{dados_mercado if dados_mercado else "Nenhum ticker específico detectado na consulta direta."}
 
-DIRETRIZES:
-1. Tom: Executivo, profissional, cordial e direto. Não use linguagem infantil ou informalidade excessiva.
-2. Formato: Use Markdown para o Teams (negrito, tópicos, emojis corporativos 📊, 💼, 🟢, 🔴).
-3. Seja conciso e direto: responda à pergunta logo no início.
-4. Se o usuário estiver te cumprimentando, responda com cortesia executiva, apresente-se como Joca B3 e diga brevemente como pode ajudá-lo na tomada de decisão financeira.
+REGRAS ESTRITAS DE RESPOSTA (ZERO PROLIXIDADE, ESTILO BLOOMBERG / TERMINAL EXECUTIVO):
+1. NUNCA faça apresentações longas nem repita quem você é ("Olá, sou o Joca B3, consultor executivo...").
+2. NUNCA use frases de transição vazias ("Sobre a sua consulta de...", "Estou à disposição para aprofundar...").
+3. VÁ DIRETO AOS FATOS E NÚMEROS (máximo 3 a 4 linhas):
+   - **TICKER:** R$ [Preço] ([emoji] [Variação%])
+   - **Volume:** R$ [Volume financeiro] ([Quantidade papéis])
+   - **Intraday:** [Análise cirúrgica de 1 ou 2 frases sobre fluxo comprador/vendedor, picos e médias].
+4. Se o usuário mandar apenas uma saudação (ex: "oi", "bom dia"), responda em UMA linha: "Olá, {user_name}. Joca B3 a postos. Qual ativo ou índice deseja monitorar?"
 
 Responda agora:"""
 
@@ -1485,9 +1498,10 @@ Responda agora:"""
         return resp.strip()
     
     if dados_mercado:
-        return f"📊 **Radar de Mercado B3 — Olá {user_name}!**\n\n{dados_mercado}\n\n📌 _Dados em tempo real via B3 & Yahoo Finance._"
+        return f"📊 **Radar B3**\n\n{dados_mercado}"
     
-    return f"Olá {user_name}! Sou o **Joca B3**, seu assistente executivo de mercado financeiro no Microsoft Teams. Posso te passar cotações em tempo real de ações (ex: PETR4, VALE3), Ibovespa, Dólar e indicadores macroeconômicos. Em que posso te apoiar hoje?"
+    return f"Olá, {user_name}. Joca B3 a postos. Qual ativo ou índice da B3 deseja consultar?"
+
 
 
 def _processar_mensagem_teams(activity):
