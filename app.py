@@ -90,6 +90,7 @@ SYNC_SECRET = os.environ.get("SYNC_SECRET", "joca_sync_2026_karl")
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PARQUET_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_MaisVendidos.parquet").replace("\\", "/")
+B3_DB_PATH = os.path.join(BASE_DIR, "b3_database.duckdb").replace("\\", "/")
 DICIONARIO_FILE = os.path.join(BASE_DIR, "dicionario_dados_ml.json")
 
 DICIONARIO_DADOS = {}
@@ -1397,111 +1398,622 @@ def enviar_mensagem_teams(service_url, conversation_id, text, reply_to_id=None):
         return False
 
 
-def obter_dados_mercado_b3(texto):
-    """Detecta menções a ativos da B3, Ibovespa ou Dólar e busca cotação real."""
+# ==============================================================================
+# 6. MOTOR DE INTELIGÊNCIA EXECUTIVA: JOCA B3 NO MICROSOFT TEAMS (8 PILARES)
+# ==============================================================================
+b3_conversation_states = {}
+
+def get_b3_db():
+    """Retorna conexão somente-leitura com a base oficial DuckDB do Painel B3."""
+    return duckdb.connect(B3_DB_PATH, read_only=True)
+
+def formatar_valor_monetario(valor):
+    if valor is None:
+        return "N/D"
+    if valor >= 1e9:
+        return f"R$ {valor / 1e9:.2f} bilhões"
+    elif valor >= 1e6:
+        return f"R$ {valor / 1e6:.1f} milhões"
+    elif valor >= 1e3:
+        return f"R$ {valor / 1e3:.1f} mil"
+    else:
+        return f"R$ {valor:.2f}"
+
+def formatar_papeis(qtd):
+    if qtd is None:
+        return ""
+    if qtd >= 1e6:
+        return f"{qtd / 1e6:.1f}M ações negociadas"
+    elif qtd >= 1e3:
+        return f"{qtd / 1e3:.1f} mil ações negociadas"
+    else:
+        return f"{int(qtd):,} ações negociadas".replace(",", ".")
+
+
+def _gerar_menu_boas_vindas(user_name="Karl"):
+    return (
+        f"👋 Olá, {user_name}! Sou o Joca B3.\n"
+        f"Fui idealizado para tirar dúvidas por aqui, integrado ao seu ambiente de trabalho "
+        f"para auxiliá-lo a respeito das informações do Painel B3.\n\n"
+        f"Me guie sobre o que você precisa de informações:\n\n"
+        f"1️⃣ Algum Índice? (Ibovespa ou Mercado Americano)\n"
+        f"2️⃣ Ticker / Ações / Ativos? (Cotação, DY e P/VP dos 102 ativos ativos da B3)\n"
+        f"3️⃣ Alguma Moeda? (Dólar Comercial PTAX)\n"
+        f"4️⃣ Volume ou Preço? (Volumes financeiros e preços de fechamento)\n"
+        f"5️⃣ Algum Indicador Macro? (Taxa Selic, IPCA 12M, IGP-M ou PIB)\n"
+        f"6️⃣ 5 Maiores Altas ou 5 Maiores Baixas? (Destaques do pregão)\n"
+        f"7️⃣ Sobre algum Setor de Atuação? (Os 10 setores oficiais da B3)\n"
+        f"8️⃣ Fluxos de Ativos / Investidores? (Capital Estrangeiro, Institucional e Pessoa Física)\n\n"
+        f"💡 Você pode simplesmente digitar o número correspondente (1 a 8) ou fazer sua pergunta diretamente!"
+    )
+
+
+def _tratar_pilar_1_indices(texto):
     t = texto.upper()
-    info = []
+    con = get_b3_db()
+    try:
+        mapa_americanos = {
+            "DOW": "^DJI", "DOW JONES": "^DJI",
+            "NASDAQ": "^IXIC", "NQ": "^NQGS",
+            "NYSE": "^NYA", "BRENT": "BZ=F", "PETRÓLEO BRENT": "BZ=F", "PETROLEO BRENT": "BZ=F",
+            "OMX": "^OMX"
+        }
+        for k, sim in mapa_americanos.items():
+            if k in t:
+                rows = con.execute("""
+                    SELECT data, indice, ticker, preco_fechamento, preco_minimo, preco_maximo 
+                    FROM fato_indices_americanos 
+                    WHERE ticker = ? 
+                    ORDER BY data DESC LIMIT 2
+                """, [sim]).fetchall()
+                if rows:
+                    r0 = rows[0]
+                    p0 = r0[3]
+                    p1 = rows[1][3] if len(rows) > 1 else p0
+                    var_pct = ((p0 - p1) / p1) * 100.0 if p1 > 0 else 0.0
+                    emoji = "🟢" if var_pct >= 0 else "🔴"
+                    dt_str = r0[0].strftime("%d/%m/%Y") if hasattr(r0[0], "strftime") else str(r0[0])
+                    return (
+                        f"📊 **{r0[1]} ({r0[2]}) — Pregão de {dt_str}**\n"
+                        f"• **Pontuação / Valor:** {p0:,.2f} ({emoji} {var_pct:+.2f}%)\n"
+                        f"• **Faixa do Dia:** Mín: {r0[4]:,.2f} | Máx: {r0[5]:,.2f}\n"
+                        f"📌 *Dados oficiais da tabela Fato_Indices_Americanos. Índices não possuem volume.*"
+                    )
+
+        r = con.execute("SELECT data, fechamento, variacao, minima, maxima FROM fato_b3_ibov ORDER BY data DESC LIMIT 1").fetchone()
+        if not r:
+            return "⚠️ Dados do Ibovespa não localizados na base oficial."
+        
+        dt_str = r[0].strftime("%d/%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
+        fech = r[1]
+        var = r[2]
+        min_p = r[3]
+        max_p = r[4]
+        emoji = "🟢" if var >= 0 else "🔴"
+
+        return (
+            f"📊 **Índice Ibovespa (^BVSP) — Pregão de {dt_str}**\n"
+            f"• **Pontuação:** {fech:,.0f} pts ({emoji} {var:+.2f}%)\n"
+            f"• **Faixa do Dia:** Mín: {min_p:,.0f} pts | Máx: {max_p:,.0f} pts\n"
+            f"📌 *Dados consolidados na base oficial do Painel B3 (Fato_B3_ibov). Índices não possuem volume.*\n\n"
+            f"💡 *Deseja consultar algum índice internacional do painel?*\n"
+            f"Basta digitar: **Dow Jones**, **Nasdaq**, **NYSE**, **Petróleo Brent** ou **OMXS30**."
+        ).replace(",", ".")
+    finally:
+        con.close()
+
+
+def _tratar_pilar_2_ticker(ticker):
+    con = get_b3_db()
+    try:
+        t_up = ticker.upper()
+        ativo = con.execute("SELECT ticker, nome_empresa, setor_atuacao, ticker_inativo FROM dim_ativos WHERE ticker = ?", [t_up]).fetchone()
+        if not ativo:
+            ativo = con.execute("SELECT ticker, nome_empresa, setor_economico, ticker_inativo FROM dim_ativos_board WHERE ticker = ?", [t_up]).fetchone()
+
+        if not ativo:
+            return f"⚠️ O ticker **{t_up}** não foi encontrado na base de ativos oficiais do Painel B3."
+
+        nome = ativo[1]
+        setor = ativo[2]
+        status = ativo[3]
+
+        if status == "INATIVA":
+            return f"⚠️ **Ativo Inativo:** O ticker **{t_up}** consta como **INATIVO** na base do Painel B3 (não é exibido nas telas ativas do relatório)."
+
+        r = con.execute("SELECT preco, variacao, dy, p_vp, volume, data FROM fato_b3_tickers WHERE ticker = ? ORDER BY data DESC LIMIT 1", [t_up]).fetchone()
+        if not r:
+            return f"📈 **{t_up} · {nome}** ({setor})\n⚠️ Sem cotação registrada no último pregão da base."
+
+        p = r[0]
+        var = r[1]
+        dy = r[2]
+        p_vp = r[3]
+        vol = r[4]
+        dt = r[5]
+        dt_str = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else str(dt)
+        emoji = "🟢" if var >= 0 else "🔴"
+        vol_str = formatar_valor_monetario(vol)
+
+        dy_str = f"{dy:.2f}%" if dy and dy > 0 else "0,00%"
+        pvp_str = f"{p_vp:.2f}x" if p_vp and p_vp > 0 else "N/D"
+
+        return (
+            f"📈 **{t_up} · {nome}** ({setor})\n"
+            f"• **Preço de Fechamento:** R$ {p:.2f} ({emoji} {var:+.2f}%)\n"
+            f"• **Volume Financeiro:** {vol_str}\n"
+            f"• **Dividend Yield (DY):** {dy_str}\n"
+            f"• **P/VP:** {pvp_str}\n"
+            f"📌 *Dados oficiais do Painel B3 (Pregão de {dt_str}).*"
+        )
+    finally:
+        con.close()
+
+
+def _tratar_pilar_3_dolar():
+    con = get_b3_db()
+    try:
+        r = con.execute("SELECT data, venda, variacao, compra, minima, maxima FROM fato_b3_dolar ORDER BY data DESC LIMIT 1").fetchone()
+        if not r:
+            return "⚠️ Dados do Dólar PTAX não localizados na base oficial."
+        
+        dt_str = r[0].strftime("%d/%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
+        venda = r[1]
+        var = r[2]
+        compra = r[3]
+        min_d = r[4]
+        max_d = r[5]
+        emoji = "🟢" if var >= 0 else "🔴"
+
+        return (
+            f"💵 **Dólar Comercial (USD/BRL PTAX) — Pregão de {dt_str}**\n"
+            f"• **Cotação Oficial (Venda):** R$ {venda:.2f} ({emoji} {var:+.2f}%)\n"
+            f"• **Compra:** R$ {compra:.4f}  |  **Venda:** R$ {venda:.4f}\n"
+            f"• **Faixa do Dia:** Mín: R$ {min_d:.4f} — Máx: R$ {max_d:.4f}\n"
+            f"📌 *Dados oficiais da tabela Fato_B3_dolar.*"
+        )
+    finally:
+        con.close()
+
+
+def _tratar_pilar_4_volume(texto, user_name):
+    tickers = re.findall(r'\b[A-Z]{4}(?:3|4|5|6|11)\b', texto.upper())
+    if not tickers:
+        nomes_map = {
+            "PETROBRAS": "PETR4", "VALE": "VALE3", "ITAU": "ITUB4", "ITAÚ": "ITUB4",
+            "BRADESCO": "BBDC4", "BANCO DO BRASIL": "BBAS3", "AMBEV": "ABEV3",
+            "WEG": "WEGE3", "MAGALU": "MGLU3", "EMBRAER": "EMBJ3"
+        }
+        for n, tk in nomes_map.items():
+            if n in texto.upper():
+                tickers.append(tk)
+                break
+
+    if not tickers:
+        return f"⚠️ Não identifiquei um ticker válido na sua resposta. Por favor, envie o código da ação (ex: `PETR4`, `VALE3`)."
+
+    tick = tickers[0]
+    con = get_b3_db()
+    try:
+        rows = con.execute("""
+            SELECT f.preco, f.variacao, f.volume, f.data, d.nome_empresa, d.setor_atuacao
+            FROM fato_b3_tickers f
+            JOIN dim_ativos d ON f.ticker = d.ticker
+            WHERE f.ticker = ?
+            ORDER BY f.data DESC LIMIT 2
+        """, [tick]).fetchall()
+
+        if not rows:
+            return f"⚠️ Ticker **{tick}** não possui registros de negociação na base oficial."
+
+        r0 = rows[0]
+        p0 = r0[0]
+        var_pct = r0[1]
+        vol = r0[2]
+        dt = r0[3]
+        nome = r0[4]
+        setor = r0[5]
+        dt_str = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else str(dt)
+
+        if len(rows) > 1:
+            p1 = rows[1][0]
+            var_liq_rs = p0 - p1
+        else:
+            var_liq_rs = p0 * (var_pct / 100.0)
+
+        emoji = "🟢" if var_pct >= 0 else "🔴"
+        sinal = "+" if var_liq_rs >= 0 else ""
+        vol_fin_str = formatar_valor_monetario(vol)
+        papeis_qtd = (vol / p0) if (vol and p0 > 0) else None
+        papeis_str = formatar_papeis(papeis_qtd)
+
+        return (
+            f"💼 **{tick} · {nome}** ({setor})\n"
+            f"• **Preço D0:** R$ {p0:.2f} ({emoji} {sinal}R$ {var_liq_rs:.2f} | {var_pct:+.2f}%)\n"
+            f"• **Volume Financeiro:** {vol_fin_str}\n"
+            f"• **Volume de Papéis:** {papeis_str}\n"
+            f"📌 *Dados oficiais do Painel B3 (Pregão de {dt_str}).*"
+        )
+    finally:
+        con.close()
+
+
+def _tratar_pilar_5_macro(texto):
+    con = get_b3_db()
+    try:
+        t = texto.upper()
+        if "SELIC" in t or "JUROS" in t:
+            r = con.execute("SELECT data, indicador, valor, unidade FROM fato_macro_diarios WHERE indicador LIKE '%Selic Meta%' ORDER BY data DESC LIMIT 1").fetchone()
+            dt_str = r[0].strftime("%d/%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
+            return (
+                f"🏦 **Taxa Selic Meta (% a.a.) — Posição em {dt_str}**\n"
+                f"• **Taxa Oficial:** {r[2]:.2f}% a.a.\n"
+                f"• **Fonte:** Banco Central do Brasil (Copom)\n"
+                f"📌 *Tabela oficial: Fato_Macro_Diarios.*"
+            )
+
+        if "IPCA" in t or "INFLAÇÃO" in t or "INFLACAO" in t:
+            r = con.execute("SELECT data, indicador, valor, unidade FROM fato_macro_mensais WHERE indicador LIKE '%IPCA Acumulado 12%' ORDER BY data DESC LIMIT 1").fetchone()
+            dt_str = r[0].strftime("%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
+            return (
+                f"🏦 **IPCA Inflação Oficial — Posição em {dt_str}**\n"
+                f"• **Acumulado 12 Meses:** {r[2]:.2f}%\n"
+                f"• **Fonte:** IBGE\n"
+                f"📌 *Tabela oficial: Fato_Macro_Mensais.*"
+            )
+
+        if "PIB" in t:
+            r = con.execute("SELECT data, indicador, valor, unidade FROM fato_macro_trimestrais WHERE indicador LIKE '%PIB%' ORDER BY data DESC LIMIT 1").fetchone()
+            dt_str = r[0].strftime("%d/%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
+            val_tri = r[2] / 1e6
+            return (
+                f"🏦 **PIB Trimestral a Preços de Mercado — Posição em {dt_str}**\n"
+                f"• **Valor Apurado:** R$ {val_tri:.2f} trilhões (R$ {r[2]:,.1f} Milhões)\n"
+                f"• **Fonte:** IBGE / BACEN\n"
+                f"📌 *Tabela oficial: Fato_macro_Trimestrais.*"
+            )
+
+        if "DI" in t or "CURVA" in t:
+            dis = con.execute("SELECT indicador, valor FROM fato_macro_diarios WHERE indicador LIKE '%DI IF%' ORDER BY data DESC LIMIT 5").fetchall()
+            linhas_di = "\n".join([f"• **{d[0]}:** {d[1]:.2f}% a.a." for d in dis])
+            return (
+                f"📈 **Curvas de Juros DI (B3)**\n"
+                f"{linhas_di}\n"
+                f"📌 *Tabela oficial: Fato_Macro_Diarios.*"
+            )
+
+        selic = con.execute("SELECT valor FROM fato_macro_diarios WHERE indicador LIKE '%Selic Meta%' ORDER BY data DESC LIMIT 1").fetchone()[0]
+        ipca = con.execute("SELECT valor FROM fato_macro_mensais WHERE indicador LIKE '%IPCA Acumulado 12%' ORDER BY data DESC LIMIT 1").fetchone()[0]
+        igpm = con.execute("SELECT valor FROM fato_macro_mensais WHERE indicador LIKE '%IGP-M Mensal%' ORDER BY data DESC LIMIT 1").fetchone()[0]
+        pib = con.execute("SELECT valor FROM fato_macro_trimestrais WHERE indicador LIKE '%PIB%' ORDER BY data DESC LIMIT 1").fetchone()[0]
+
+        return (
+            f"🏦 **Cenário Macroeconômico Oficial (BACEN / IBGE / FGV)**\n"
+            f"• **Taxa Selic Meta:** {selic:.2f}% a.a. (Copom/BACEN · Diário)\n"
+            f"• **IPCA Acumulado 12 Meses:** {ipca:.2f}% (IBGE · Mensal)\n"
+            f"• **IGP-M Mensal:** {igpm:.2f}% (FGV · Mensal)\n"
+            f"• **PIB Trimestral a Preços de Mercado:** R$ {pib/1e6:.2f} trilhões (IBGE · Trimestral)\n"
+            f"📌 *Dados consolidados das 3 tabelas oficiais: Fato_Macro_Diarios, Fato_Macro_Mensais e Fato_macro_Trimestrais.*\n\n"
+            f"💡 *Deseja detalhar algum indicador específico? Digite: **Selic**, **IPCA**, **IGP-M**, **PIB**, **Curva de DI** ou **CAGED**.*"
+        )
+    finally:
+        con.close()
+
+
+def _tratar_pilar_6_altas_baixas(texto, user_name):
+    con = get_b3_db()
+    try:
+        t = texto.strip().upper()
+        if t in ["HOJE", "ULTIMO", "ÚLTIMO", "RECENTE"]:
+            dt_target = con.execute("SELECT max(data) FROM fato_b3_tickers").fetchone()[0]
+        else:
+            match = re.search(r'(\d{2})[/-](\d{2})[/-](\d{4})', t)
+            if match:
+                dt_target = f"{match.group(3)}-{match.group(2)}-{match.group(1)}"
+            else:
+                match_iso = re.search(r'(\d{4})[/-](\d{2})[/-](\d{2})', t)
+                if match_iso:
+                    dt_target = f"{match_iso.group(1)}-{match_iso.group(2)}-{match_iso.group(3)}"
+                else:
+                    dt_target = con.execute("SELECT max(data) FROM fato_b3_tickers").fetchone()[0]
+
+        dt_str_iso = dt_target.strftime("%Y-%m-%d") if hasattr(dt_target, "strftime") else str(dt_target)
+        dt_exibicao = dt_target.strftime("%d/%m/%Y") if hasattr(dt_target, "strftime") else datetime.strptime(dt_str_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+
+        altas = con.execute("""
+            SELECT f.ticker, d.nome_empresa, f.preco, f.variacao 
+            FROM fato_b3_tickers f
+            JOIN dim_ativos d ON f.ticker = d.ticker
+            WHERE f.data = ? AND d.ticker_inativo = 'ATIVA' AND d.setor_atuacao NOT IN ('IBOV', 'DOLAR')
+            ORDER BY f.variacao DESC LIMIT 5
+        """, [dt_str_iso]).fetchall()
+
+        if not altas:
+            prox = con.execute("SELECT max(data) FROM fato_b3_tickers WHERE data < ?", [dt_str_iso]).fetchone()[0]
+            prox_str = prox.strftime("%d/%m/%Y") if prox else "N/D"
+            return f"⚠️ Não houve pregão ou registros em **{dt_exibicao}** (fim de semana ou feriado).\nO pregão útil anterior mais próximo foi em **{prox_str}**."
+
+        baixas = con.execute("""
+            SELECT f.ticker, d.nome_empresa, f.preco, f.variacao 
+            FROM fato_b3_tickers f
+            JOIN dim_ativos d ON f.ticker = d.ticker
+            WHERE f.data = ? AND d.ticker_inativo = 'ATIVA' AND d.setor_atuacao NOT IN ('IBOV', 'DOLAR')
+            ORDER BY f.variacao ASC LIMIT 5
+        """, [dt_str_iso]).fetchall()
+
+        linhas_altas = []
+        for a in altas:
+            linhas_altas.append(f"| **{a[0]}** | {a[1][:20]} | R$ {a[2]:.2f} | 🟢 {a[3]:+.2f}% |")
+
+        linhas_baixas = []
+        for b in baixas:
+            linhas_baixas.append(f"| **{b[0]}** | {b[1][:20]} | R$ {b[2]:.2f} | 🔴 {b[3]:+.2f}% |")
+
+        tab_altas = "\n".join(linhas_altas)
+        tab_baixas = "\n".join(linhas_baixas)
+
+        return (
+            f"🏆 **Destaques do Pregão B3 — Pregão de {dt_exibicao}**\n\n"
+            f"🟢 **Top 5 Maiores Altas:**\n"
+            f"| Ticker | Empresa | Fechamento | Variação % |\n"
+            f"| :--- | :--- | :--- | :--- |\n"
+            f"{tab_altas}\n\n"
+            f"🔴 **Top 5 Maiores Baixas:**\n"
+            f"| Ticker | Empresa | Fechamento | Variação % |\n"
+            f"| :--- | :--- | :--- | :--- |\n"
+            f"{tab_baixas}\n\n"
+            f"📌 *Dados oficiais extraídos da Fato_B3_tickers para a data {dt_exibicao}.*"
+        )
+    finally:
+        con.close()
+
+
+def _tratar_pilar_7_setores(texto):
+    con = get_b3_db()
+    try:
+        t = texto.upper()
+        setores_nomes = {
+            "CONSUMO CÍCLICO": "Consumo Cíclico", "CONSUMO CICLICO": "Consumo Cíclico", "VAREJO": "Consumo Cíclico",
+            "UTILIDADE PÚBLICA": "Utilidade Pública", "UTILIDADE PUBLICA": "Utilidade Pública", "ENERGIA": "Utilidade Pública", "SANEAMENTO": "Utilidade Pública",
+            "FINANCEIRO": "Financeiro", "BANCOS": "Financeiro", "SEGUROS": "Financeiro",
+            "MATERIAIS BÁSICOS": "Materiais Básicos", "MATERIAIS BASICOS": "Materiais Básicos", "MINERAÇÃO": "Materiais Básicos", "SIDERURGIA": "Materiais Básicos",
+            "CONSUMO NÃO CÍCLICO": "Consumo não Cíclico", "CONSUMO NAO CICLICO": "Consumo não Cíclico", "ALIMENTOS": "Consumo não Cíclico",
+            "PETRÓLEO E GÁS": "Petróleo e Gás", "PETROLEO E GAS": "Petróleo e Gás", "PETRÓLEO": "Petróleo e Gás", "PETROLEO": "Petróleo e Gás",
+            "BENS INDUSTRIAIS": "Bens Industriais", "INDÚSTRIA": "Bens Industriais", "INDUSTRIA": "Bens Industriais", "MÁQUINAS": "Bens Industriais",
+            "SAÚDE": "Saúde", "SAUDE": "Saúde", "FARMÁCIA": "Saúde", "HOSPITAIS": "Saúde",
+            "TELECOM": "Telecom", "TELECOMUNICAÇÕES": "Telecom", "TELECOMUNICACOES": "Telecom",
+            "TECNOLOGIA DA INFORMAÇÃO": "Tecnologia da Informação", "TECNOLOGIA": "Tecnologia da Informação", "TI": "Tecnologia da Informação"
+        }
+
+        setor_escolhido = None
+        for k, v in setores_nomes.items():
+            if k in t and t != "7":
+                setor_escolhido = v
+                break
+
+        if setor_escolhido:
+            dt_target = con.execute("SELECT max(data) FROM fato_b3_tickers").fetchone()[0]
+            dt_exib = dt_target.strftime("%d/%m/%Y") if hasattr(dt_target, "strftime") else str(dt_target)
+            rows = con.execute("""
+                SELECT f.ticker, d.nome_empresa, f.preco, f.variacao
+                FROM fato_b3_tickers f
+                JOIN dim_ativos d ON f.ticker = d.ticker
+                WHERE f.data = ? AND d.setor_atuacao = ? AND d.ticker_inativo = 'ATIVA'
+                ORDER BY f.variacao DESC
+            """, [dt_target, setor_escolhido]).fetchall()
+
+            linhas = []
+            for r in rows:
+                emoji = "🟢" if r[3] >= 0 else "🔴"
+                linhas.append(f"• **{r[0]} ({r[1][:18]}):** R$ {r[2]:.2f} ({emoji} {r[3]:+.2f}%)")
+
+            return (
+                f"🏢 **Setor: {setor_escolhido} ({len(rows)} ativos ativos) — Pregão de {dt_exib}**\n\n"
+                + "\n".join(linhas) + "\n\n"
+                f"📌 *Dados oficiais do Painel B3 (Dim_Ativos e Fato_B3_tickers).*"
+            )
+
+        dt_target = con.execute("SELECT max(data) FROM fato_b3_tickers").fetchone()[0]
+        dt_exib = dt_target.strftime("%d/%m/%Y") if hasattr(dt_target, "strftime") else str(dt_target)
+
+        setores = con.execute("""
+            SELECT 
+                d.setor_atuacao,
+                count(f.ticker) as qtd,
+                round(avg(f.variacao), 2) as var_media
+            FROM fato_b3_tickers f
+            JOIN dim_ativos d ON f.ticker = d.ticker
+            WHERE f.data = ? AND d.ticker_inativo = 'ATIVA' AND d.setor_atuacao NOT IN ('IBOV', 'DOLAR')
+            GROUP BY d.setor_atuacao
+            ORDER BY var_media DESC
+        """, [dt_target]).fetchall()
+
+        linhas_tab = []
+        for idx, s in enumerate(setores, 1):
+            emoji = "🟢" if s[2] >= 0 else "🔴"
+            linhas_tab.append(f"| {idx}. **{s[0]}** | {s[1]} | {emoji} {s[2]:+.2f}% |")
+
+        tab_str = "\n".join(linhas_tab)
+
+        return (
+            f"🏢 **Desempenho dos 10 Setores Oficiais B3 — Pregão de {dt_exib}**\n\n"
+            f"| Setor Econômico | Ativos | Desempenho Médio |\n"
+            f"| :--- | :---: | :---: |\n"
+            f"{tab_str}\n\n"
+            f"📌 *Cálculo ponderado sobre os 102 ativos ativos da base oficial do Painel B3.*\n"
+            f"💡 *Deseja ver os ativos de algum setor? Digite o nome (ex: `Petróleo e Gás`, `Financeiro`, `Saúde`).*"
+        )
+    finally:
+        con.close()
+
+
+def _tratar_pilar_8_fluxos(texto):
+    con = get_b3_db()
+    try:
+        t = texto.upper()
+        match = re.search(r'(\d{2})[/-](\d{2})[/-](\d{4})', t)
+        if match:
+            dt_target = f"{match.group(3)}-{match.group(2)}-{match.group(1)}"
+        else:
+            dt_target = con.execute("SELECT max(data) FROM fato_fluxo_investidores_b3").fetchone()[0]
+
+        dt_str_iso = dt_target.strftime("%Y-%m-%d") if hasattr(dt_target, "strftime") else str(dt_target)
+        dt_exib = dt_target.strftime("%d/%m/%Y") if hasattr(dt_target, "strftime") else datetime.strptime(dt_str_iso, "%Y-%m-%d").strftime("%d/%m/%Y")
+
+        fluxos = con.execute("""
+            SELECT tipo_investidor, saldo_liquido_mil
+            FROM fato_fluxo_investidores_b3
+            WHERE data = ?
+            ORDER BY saldo_liquido_mil DESC
+        """, [dt_str_iso]).fetchall()
+
+        if not fluxos:
+            return f"⚠️ Dados de fluxo de investidores não disponíveis para a data **{dt_exib}**."
+
+        icones = {
+            "Investidor Estrangeiro": "🌎",
+            "Institucionais": "🏛️",
+            "Instituições Financeiras": "🏦",
+            "Investidores Individuais": "👤",
+            "Outros": "🏢"
+        }
+
+        linhas = []
+        for f in fluxos:
+            tipo = f[0]
+            saldo_mil = f[1]
+            saldo_reais = saldo_mil * 1000.0
+            ico = icones.get(tipo, "💼")
+            emoji = "🟢" if saldo_mil >= 0 else "🔴"
+            mov = "Entrada Líquida" if saldo_mil >= 0 else "Saída Líquida"
+            
+            if abs(saldo_reais) >= 1e9:
+                val_fmt = f"{emoji} {saldo_reais/1e9:+.2f} bilhões"
+            elif abs(saldo_reais) >= 1e6:
+                val_fmt = f"{emoji} {saldo_reais/1e6:+.1f} milhões"
+            else:
+                val_fmt = f"{emoji} {saldo_reais:,.0f}"
+
+            linhas.append(f"| {ico} **{tipo}** | **{val_fmt}** | {mov} |")
+
+        tab_fluxo = "\n".join(linhas)
+
+        return (
+            f"🌊 **Fluxo de Ativos e Investidores B3 — Pregão de {dt_exib}**\n\n"
+            f"| Tipo de Investidor | Saldo Líquido do Dia | Movimentação |\n"
+            f"| :--- | :---: | :--- |\n"
+            f"{tab_fluxo}\n\n"
+            f"📌 *Dados oficiais da tabela Fato_Fluxo_Investidores_B3.*\n"
+            f"💡 *Deseja consultar o fluxo de outra data? Basta digitar: `fluxo DD/MM/AAAA`.*"
+        )
+    finally:
+        con.close()
+
+
+def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
+    t_clean = texto.strip()
+    t_upper = t_clean.upper()
+    state = b3_conversation_states.get(conversation_id, {})
+
+    gatilhos_menu = [
+        "OI", "OLÁ", "OLA", "BOM DIA", "BOA TARDE", "BOA NOITE", 
+        "E AÍ", "E AI", "OPA", "MENU", "AJUDA", "HELP", "INICIAR", 
+        "/START", "OPÇÕES", "OPCOES", "O QUE VOCÊ FAZ", "COMANDOS"
+    ]
     
-    # Dólar Comercial
-    if any(k in t for k in ["DOLAR", "DÓLAR", "USD", "CAMBIO", "CÂMBIO"]):
-        try:
-            r = requests.get("https://economia.awesomeapi.com.br/last/USD-BRL", timeout=4).json()
-            bid = float(r["USDBRL"]["bid"])
-            pct = float(r["USDBRL"]["pctChange"])
-            emoji = "🟢" if pct >= 0 else "🔴"
-            info.append(f"• **Dólar Comercial (USD/BRL):** R$ {bid:.2f} ({emoji} {pct:+.2f}%)")
-        except Exception:
-            pass
+    # Se o usuário enviar um comando numérico direto (1 a 8) ou pedir menu/saudação, cancela estado pendente anterior
+    if t_clean in ["1", "2", "3", "4", "5", "6", "7", "8"] or t_upper in gatilhos_menu or t_upper in ["@JOCA", "@JOCA B3"]:
+        b3_conversation_states.pop(conversation_id, None)
+    else:
+        # 0. Resolução de estado conversacional interativo (2 etapas)
+        if state.get("action") == "awaiting_ticker_for_volume":
+            b3_conversation_states.pop(conversation_id, None)
+            return _tratar_pilar_4_volume(t_clean, user_name)
 
-    # Ibovespa
-    if any(k in t for k in ["IBOV", "IBOVESPA", "BOLSA"]):
-        try:
-            headers = {"User-Agent": "Mozilla/5.0"}
-            r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/%5EBVSP?range=1d&interval=1d", headers=headers, timeout=4).json()
-            meta = r["chart"]["result"][0]["meta"]
-            preco = meta.get("regularMarketPrice")
-            prev = meta.get("chartPreviousClose")
-            var = ((preco - prev) / prev) * 100 if prev else 0.0
-            emoji = "🟢" if var >= 0 else "🔴"
-            info.append(f"• **Ibovespa (^BVSP):** {preco:,.0f} pts ({emoji} {var:+.2f}%)".replace(",", "."))
-        except Exception:
-            pass
+        if state.get("action") == "awaiting_date_for_ranking":
+            b3_conversation_states.pop(conversation_id, None)
+            return _tratar_pilar_6_altas_baixas(t_clean, user_name)
 
-    # Ações da B3 (Regex: 4 letras + 3, 4, 5, 6 ou 11)
-    tickers = re.findall(r'\b[A-Z]{4}(?:3|4|5|6|11)\b', t)
+    # 1. Saudação & Menu Geral
+    if t_upper in gatilhos_menu or t_upper == "@JOCA" or t_upper == "@JOCA B3":
+        return _gerar_menu_boas_vindas(user_name)
+
+    # 2. Pilares Numéricos Diretos (1 a 8) e Palavras-Gatilho
+    # Pilar 1: Índices
+    if t_clean == "1" or any(k in t_upper for k in ["IBOV", "IBOVESPA", "BOVESPA", "DOW JONES", "NASDAQ", "NYSE", "BRENT", "OMX", "ÍNDICE", "INDICE", "ÍNDICES", "INDICES"]):
+        return _tratar_pilar_1_indices(t_clean)
+
+    # Pilar 3: Dólar PTAX
+    if t_clean == "3" or any(k in t_upper for k in ["DOLAR", "DÓLAR", "USD", "CAMBIO", "CÂMBIO", "PTAX"]):
+        return _tratar_pilar_3_dolar()
+
+    # Pilar 4: Volume e Preço
+    if t_clean == "4" or any(k in t_upper for k in ["VOLUME FINANCEIRO", "VOLUME NEGOCIADO", "MAIOR VOLUME", "MAIS NEGOCIADAS"]):
+        tickers_encontrados = re.findall(r'\b[A-Z]{4}(?:3|4|5|6|11)\b', t_upper)
+        if tickers_encontrados:
+            return _tratar_pilar_4_volume(tickers_encontrados[0], user_name)
+        b3_conversation_states[conversation_id] = {"action": "awaiting_ticker_for_volume", "timestamp": time.time()}
+        return (
+            f"💼 **Consulta de Volume e Preço por Ativo**\n\n"
+            f"Por favor, digite o código da ação para consultar o volume financeiro e o comportamento de preço.\n"
+            f"*Exemplos ativos do painel: `PETR4`, `VALE3`, `ITUB4`, `WEGE3`.*"
+        )
+
+    # Pilar 5: Indicadores Macro
+    if t_clean == "5" or any(k in t_upper for k in ["MACRO", "INDICADOR", "INDICADORES", "SELIC", "IPCA", "INFLAÇÃO", "INFLACAO", "IGPM", "IGP-M", "PIB", "IBC-BR", "CAGED", "CURVA DE DI"]):
+        return _tratar_pilar_5_macro(t_clean)
+
+    # Pilar 6: 5 Altas e 5 Baixas
+    if t_clean == "6" or any(k in t_upper for k in ["MAIORES ALTAS", "TOP ALTAS", "MAIORES BAIXAS", "TOP BAIXAS", "DESTAQUES DO DIA", "RANKING"]):
+        match_data = re.search(r'(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2}|HOJE|ONTEM)', t_upper)
+        if match_data and t_clean != "6":
+            return _tratar_pilar_6_altas_baixas(match_data.group(1), user_name)
+        b3_conversation_states[conversation_id] = {"action": "awaiting_date_for_ranking", "timestamp": time.time()}
+        return (
+            f"📅 **De qual data você deseja consultar as Maiores Altas e Baixas?**\n\n"
+            f"Por favor, envie a data desejada (exemplo: `02/10/2026`) ou digite **hoje** para o último pregão disponível na base."
+        )
+
+    # Pilar 7: Setores Oficiais (Opção B - Resumo Executivo)
+    setores_palavras = [
+        "SETOR", "SETORES", "SEGMENTO", "SEGMENTOS", "INDÚSTRIA", "INDUSTRIA",
+        "CONSUMO CÍCLICO", "UTILIDADE PÚBLICA", "FINANCEIRO", "MATERIAIS BÁSICOS",
+        "CONSUMO NÃO CÍCLICO", "PETRÓLEO", "PETROLEO", "BENS INDUSTRIAIS", "SAÚDE", "SAUDE",
+        "TELECOM", "TECNOLOGIA DA INFORMAÇÃO"
+    ]
+    if t_clean == "7" or any(k in t_upper for k in setores_palavras):
+        return _tratar_pilar_7_setores(t_clean)
+
+    # Pilar 8: Fluxos de Ativos / Investidores
+    if t_clean == "8" or any(k in t_upper for k in ["FLUXO", "FLUXOS", "INVESTIDOR", "INVESTIDORES", "ESTRANGEIRO", "GRINGO", "INSTITUCIONAL", "INSTITUCIONAIS", "PESSOA FÍSICA", "PESSOA FISICA"]):
+        return _tratar_pilar_8_fluxos(t_clean)
+
+    # Pilar 2: Tickers / Ações / Ativos
+    if t_clean == "2" or any(k in t_upper for k in ["AÇÕES", "ACOES", "ATIVOS", "PAPÉIS", "PAPEIS", "COTAÇÃO", "COTACAO", "TICKERS"]):
+        tickers_encontrados = re.findall(r'\b[A-Z]{4}(?:3|4|5|6|11)\b', t_upper)
+        if tickers_encontrados:
+            return _tratar_pilar_2_ticker(tickers_encontrados[0])
+        return (
+            f"📈 **Consulta de Ações e Ativos (102 ativos ativos no Painel B3)**\n\n"
+            f"Por favor, digite o código da ação que deseja consultar.\n"
+            f"*Exemplos ativos mais procurados: `PETR4`, `VALE3`, `ITUB4`, `WEGE3`, `BBAS3`.*"
+        )
+
+    tickers_encontrados = re.findall(r'\b[A-Z]{4}(?:3|4|5|6|11)\b', t_upper)
+    if tickers_encontrados:
+        return _tratar_pilar_2_ticker(tickers_encontrados[0])
+
     nomes_map = {
-        "PETROBRAS": "PETR4", "PETRO": "PETR4",
-        "VALE": "VALE3",
-        "ITAU": "ITUB4", "ITAÚ": "ITUB4",
-        "BRADESCO": "BBDC4",
-        "BANCO DO BRASIL": "BBAS3",
-        "AMBEV": "ABEV3",
-        "WEG": "WEGE3",
-        "MAGALU": "MGLU3", "MAGAZINE LUIZA": "MGLU3"
+        "PETROBRAS": "PETR4", "VALE": "VALE3", "ITAU": "ITUB4", "ITAÚ": "ITUB4",
+        "BRADESCO": "BBDC4", "BANCO DO BRASIL": "BBAS3", "AMBEV": "ABEV3",
+        "WEG": "WEGE3", "MAGALU": "MGLU3", "MAGAZINE LUIZA": "MGLU3", "EMBRAER": "EMBJ3",
+        "SUZANO": "SUZB3", "GERDAU": "GGBR4", "LOCALIZA": "RENT3", "B3": "B3SA3", "RAIZEN": "RAIZ4"
     }
-    for nome, tick in nomes_map.items():
-        if nome in t and tick not in tickers:
-            tickers.append(tick)
+    for n, tick in nomes_map.items():
+        if n in t_upper:
+            return _tratar_pilar_2_ticker(tick)
 
-    headers = {"User-Agent": "Mozilla/5.0"}
-    for tick in set(tickers[:4]):
-        try:
-            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{tick}.SA?range=1d&interval=1d"
-            r = requests.get(url, headers=headers, timeout=4).json()
-            meta = r["chart"]["result"][0]["meta"]
-            p = meta.get("regularMarketPrice")
-            prev = meta.get("chartPreviousClose")
-            var = ((p - prev) / prev) * 100 if prev else 0.0
-            emoji = "🟢" if var >= 0 else "🔴"
-            
-            vol = meta.get("regularMarketVolume", 0) or 0
-            vol_fin = (p * vol) if (p and vol) else 0
-            vol_fin_str = f"R$ {vol_fin / 1e9:.2f} bi" if vol_fin >= 1e9 else (f"R$ {vol_fin / 1e6:.1f} mi" if vol_fin > 0 else "N/D")
-            vol_pap_str = f"{vol / 1e6:.1f}M papéis" if vol >= 1e6 else (f"{vol:,.0f} papéis" if vol > 0 else "")
-            vol_display = f"{vol_fin_str} ({vol_pap_str})" if vol_pap_str else vol_fin_str
-            
-            d_low = meta.get("regularMarketDayLow")
-            d_high = meta.get("regularMarketDayHigh")
-            range_str = f" | Mín: R$ {d_low:.2f} - Máx: R$ {d_high:.2f}" if (d_low and d_high) else ""
-            
-            info.append(f"• **{tick}:** R$ {p:.2f} ({emoji} {var:+.2f}%) | Vol: {vol_display}{range_str}")
-        except Exception:
-            pass
-
-    return "\n".join(info) if info else None
-
-
-def processar_pergunta_b3(texto, user_name="Karl"):
-    dados_mercado = obter_dados_mercado_b3(texto)
-    
-    prompt = f"""Você é o Joca B3, consultor executivo de inteligência e analytics de mercado da B3 no Microsoft Teams.
-
-USUÁRIO: {user_name}
-PERGUNTA: "{texto}"
-
-DADOS EM TEMPO REAL:
-{dados_mercado if dados_mercado else "Nenhum ticker específico detectado na consulta direta."}
-
-REGRAS ESTRITAS DE RESPOSTA (ZERO PROLIXIDADE, ESTILO BLOOMBERG / TERMINAL EXECUTIVO):
-1. NUNCA faça apresentações longas nem repita quem você é ("Olá, sou o Joca B3, consultor executivo...").
-2. NUNCA use frases de transição vazias ("Sobre a sua consulta de...", "Estou à disposição para aprofundar...").
-3. VÁ DIRETO AOS FATOS E NÚMEROS (máximo 3 a 4 linhas):
-   - **TICKER:** R$ [Preço] ([emoji] [Variação%])
-   - **Volume:** R$ [Volume financeiro] ([Quantidade papéis])
-   - **Intraday:** [Análise cirúrgica de 1 ou 2 frases sobre fluxo comprador/vendedor, picos e médias].
-4. Se o usuário mandar apenas uma saudação (ex: "oi", "bom dia"), responda em UMA linha: "Olá, {user_name}. Joca B3 a postos. Qual ativo ou índice deseja monitorar?"
-
-Responda agora:"""
-
-    resp = chamar_gemini(prompt)
-    if resp:
-        return resp.strip()
-    
-    if dados_mercado:
-        return f"📊 **Radar B3**\n\n{dados_mercado}"
-    
-    return f"Olá, {user_name}. Joca B3 a postos. Qual ativo ou índice da B3 deseja consultar?"
-
+    return _gerar_menu_boas_vindas(user_name)
 
 
 def _processar_mensagem_teams(activity):
@@ -1516,7 +2028,6 @@ def _processar_mensagem_teams(activity):
         user_name = activity.get("from", {}).get("name", "Karl")
         activity_id = activity.get("id")
 
-        # Salva a sessão ativa para envio proativo de alertas do Juca
         try:
             from juca_supervisor import salvar_sessao_teams, juca
             salvar_sessao_teams(conversation_id, service_url, user_name)
@@ -1525,20 +2036,18 @@ def _processar_mensagem_teams(activity):
 
         t_inicio = time.time()
 
-        # Roteamento Inteligente: Se Karl chamar o Juca ou pedir status dos robôs/atualizações
         t_upper = texto.upper()
         if any(w in t_upper for w in ["JUCA", "STATUS GERAL", "ROBOS", "ROBÔS", "CHEFE", "SUPERVISOR", "ATUALIZA", "ATUALIZAR", "PIPELINE"]):
             from juca_supervisor import juca
             resposta = juca.responder_comando_teams(texto, user_name)
             bot_tag = "Juca_Supervisor_Teams"
         else:
-            resposta = processar_pergunta_b3(texto, user_name)
+            resposta = processar_pergunta_b3(texto, user_name, conversation_id)
             bot_tag = "Joca_B3_Teams"
 
         tempo_total = round(time.time() - t_inicio, 2)
         enviar_mensagem_teams(service_url, conversation_id, resposta, reply_to_id=activity_id)
 
-        # Telemetria para o Power BI
         try:
             agora = datetime.now()
             salvar_conversa({
@@ -1575,13 +2084,7 @@ def _tratar_boas_vindas_teams(activity):
         except Exception:
             pass
 
-        msg_bv = (
-            f"Olá, {user_name}! Sou o **Joca B3**, seu consultor executivo de inteligência e analytics "
-            f"da Bolsa de Valores (B3) no Microsoft Teams. 📊\n\n"
-            f"Estou pronto para te apoiar com cotações de ações, fechamento de pregão, Ibovespa, Dólar "
-            f"e indicadores macroeconômicos. Em que posso te ajudar hoje?\n\n"
-            f"👑 *Nosso supervisor geral **Juca** também está ativo. Diga `Juca status` a qualquer momento para ver os robôs e pipelines.*"
-        )
+        msg_bv = _gerar_menu_boas_vindas(user_name)
         enviar_mensagem_teams(service_url, conversation_id, msg_bv)
     except Exception as e:
         logger.error(f"Erro nas boas-vindas do Teams: {e}")
