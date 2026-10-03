@@ -1493,7 +1493,7 @@ Responda agora:"""
 def _processar_mensagem_teams(activity):
     try:
         texto_bruto = activity.get("text", "") or ""
-        texto = re.sub(r'<at>.*?</at>', '', texto_bruto).replace("@Joca", "").strip()
+        texto = re.sub(r'<at>.*?</at>', '', texto_bruto).replace("@Joca", "").replace("@Juca", "").strip()
         if not texto:
             return
 
@@ -1502,10 +1502,26 @@ def _processar_mensagem_teams(activity):
         user_name = activity.get("from", {}).get("name", "Karl")
         activity_id = activity.get("id")
 
-        t_inicio = time.time()
-        resposta = processar_pergunta_b3(texto, user_name)
-        tempo_total = round(time.time() - t_inicio, 2)
+        # Salva a sessão ativa para envio proativo de alertas do Juca
+        try:
+            from juca_supervisor import salvar_sessao_teams, juca
+            salvar_sessao_teams(conversation_id, service_url, user_name)
+        except Exception as e_s:
+            logger.error(f"Erro ao salvar sessao Teams: {e_s}")
 
+        t_inicio = time.time()
+
+        # Roteamento Inteligente: Se Karl chamar o Juca ou pedir status dos robôs/atualizações
+        t_upper = texto.upper()
+        if any(w in t_upper for w in ["JUCA", "STATUS GERAL", "ROBOS", "ROBÔS", "CHEFE", "SUPERVISOR", "ATUALIZA", "ATUALIZAR", "PIPELINE"]):
+            from juca_supervisor import juca
+            resposta = juca.responder_comando_teams(texto, user_name)
+            bot_tag = "Juca_Supervisor_Teams"
+        else:
+            resposta = processar_pergunta_b3(texto, user_name)
+            bot_tag = "Joca_B3_Teams"
+
+        tempo_total = round(time.time() - t_inicio, 2)
         enviar_mensagem_teams(service_url, conversation_id, resposta, reply_to_id=activity_id)
 
         # Telemetria para o Power BI
@@ -1516,7 +1532,7 @@ def _processar_mensagem_teams(activity):
                 "data_hora": agora.strftime("%Y-%m-%d %H:%M:%S"),
                 "data": agora.strftime("%Y-%m-%d"),
                 "hora": agora.strftime("%H:%M:%S"),
-                "bot": "Joca_B3_Teams",
+                "bot": bot_tag,
                 "chat_id": str(conversation_id),
                 "usuario": user_name,
                 "username": activity.get("from", {}).get("id", ""),
@@ -1539,11 +1555,18 @@ def _tratar_boas_vindas_teams(activity):
         conversation_id = activity.get("conversation", {}).get("id", "")
         user_name = activity.get("from", {}).get("name", "Karl")
         
+        try:
+            from juca_supervisor import salvar_sessao_teams
+            salvar_sessao_teams(conversation_id, service_url, user_name)
+        except Exception:
+            pass
+
         msg_bv = (
             f"Olá, {user_name}! Sou o **Joca B3**, seu consultor executivo de inteligência e analytics "
             f"da Bolsa de Valores (B3) no Microsoft Teams. 📊\n\n"
             f"Estou pronto para te apoiar com cotações de ações, fechamento de pregão, Ibovespa, Dólar "
-            f"e indicadores macroeconômicos. Em que posso te ajudar hoje?"
+            f"e indicadores macroeconômicos. Em que posso te ajudar hoje?\n\n"
+            f"👑 *Nosso supervisor geral **Juca** também está ativo. Diga `Juca status` a qualquer momento para ver os robôs e pipelines.*"
         )
         enviar_mensagem_teams(service_url, conversation_id, msg_bv)
     except Exception as e:
@@ -1640,9 +1663,80 @@ def sync_data():
         logger.error(f"Erro na sincronização: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
+
+# ==============================================================================
+# 7. ROTAS DO JUCA · O CHEFE DOS JOCAS & SUPERVISOR DE AUTO-RECUPERAÇÃO
+# ==============================================================================
+@app.route("/api/juca/status", methods=["GET"])
+def juca_status_api():
+    try:
+        from juca_supervisor import carregar_estado_juca, PIPELINES
+        estado = carregar_estado_juca()
+        return jsonify({
+            "status": "success",
+            "juca": "Ativo",
+            "papeis": "Supervisor dos 3 Jocas e Automação de Cargas",
+            "estado": estado,
+            "pipelines_monitorados": [p["tag"] for p in PIPELINES]
+        }), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/juca/monitor", methods=["GET", "POST"])
+def juca_monitor_api():
+    try:
+        from juca_supervisor import juca
+        rel = juca.executar_ciclo_vigilancia()
+        return jsonify({"status": "success", "relatorio": rel}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/juca/disparar", methods=["POST"])
+def juca_disparar_api():
+    try:
+        req = request.get_json(silent=True) or {}
+        pipeline_id = req.get("pipeline_id", "b3")
+        from juca_supervisor import juca, PIPELINES
+        alvo = next((p for p in PIPELINES if p["id"] == pipeline_id), None)
+        if not alvo:
+            return jsonify({"status": "error", "message": f"Pipeline '{pipeline_id}' não encontrado"}), 404
+        sucesso, msg = juca.disparar_workflow_botao(alvo["repo"], alvo["wf"])
+        return jsonify({
+            "status": "success" if sucesso else "error",
+            "message": msg,
+            "pipeline": alvo["name"]
+        }), (200 if sucesso else 500)
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/api/juca/test_alerta", methods=["GET", "POST"])
+def juca_test_alerta_api():
+    try:
+        from juca_supervisor import juca
+        titulo = "🟡 **[JUCA SUPERVISOR] Teste Operacional de Comunicação**"
+        msg = "Karl, este é um teste disparado pelo Juca Supervisor para validar o canal de comunicação direto no Teams!"
+        juca.enviar_alerta_teams(titulo, msg, severity="warning")
+        return jsonify({"status": "success", "message": "Alerta de teste enviado com sucesso"}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
+# Inicializa a thread de vigilância autônoma do Juca
+try:
+    from juca_supervisor import iniciar_vigilancia_background
+    iniciar_vigilancia_background(intervalo_segundos=300)
+    logger.info("Thread do Juca Supervisor iniciada com sucesso em background.")
+except Exception as e_juca:
+    logger.error(f"Erro ao iniciar vigilância do Juca: {e_juca}")
+
+
 # ==============================================================================
 # 8. EXECUÇÃO DO APLICATIVO
 # ==============================================================================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+

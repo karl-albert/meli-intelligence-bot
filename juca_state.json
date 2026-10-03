@@ -1,0 +1,38 @@
+{
+  "incidentes": {
+    "mercadolivre": {
+      "pipeline": "mercadolivre",
+      "nome": "Mercado Livre · Mais Vendidos & Inteligência",
+      "motivo_original": "Agendamento das 23:00 não executou (Atraso de 128 min, tolerância de 30 min)",
+      "primeiro_disparo": "2026-10-03T01:08:25.288987-03:00",
+      "status": "AUTO_HEALING_DISPARADO",
+      "disparo_sucesso": false,
+      "escalonado_karl": false
+    },
+    "mp": {
+      "pipeline": "mp",
+      "nome": "Ministério Público · Supabase",
+      "motivo_original": "Agendamento das 22:30 não executou (Atraso de 158 min, tolerância de 45 min)",
+      "primeiro_disparo": "2026-10-03T01:08:25.288987-03:00",
+      "status": "AUTO_HEALING_DISPARADO",
+      "disparo_sucesso": false,
+      "escalonado_karl": false
+    }
+  },
+  "historico_acoes": [
+    {
+      "data_hora": "2026-10-03 01:08:25",
+      "pipeline": "mercadolivre",
+      "evento": "AUTO_HEAL_DISPARADO",
+      "detalhe": "Juca disparou rotina_mercadolivre.yml após detectar Agendamento das 23:00 não executou (Atraso de 128 min, tolerância de 30 min)"
+    },
+    {
+      "data_hora": "2026-10-03 01:08:25",
+      "pipeline": "mp",
+      "evento": "AUTO_HEAL_DISPARADO",
+      "detalhe": "Juca disparou carga-mp.yml após detectar Agendamento das 22:30 não executou (Atraso de 158 min, tolerância de 45 min)"
+    }
+  ],
+  "ultimo_check": "2026-10-03 01:08:25",
+  "status_geral": "ALERTA"
+}
