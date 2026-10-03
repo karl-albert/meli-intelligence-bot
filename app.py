@@ -2137,6 +2137,14 @@ def test_ai():
     q = request.args.get("q", "Qual a data mais recente?")
     return jsonify({"pergunta": q, "resposta": processar_pergunta(q, "Karl")})
 
+@app.route("/test_b3", methods=["GET", "POST"])
+def test_b3():
+    q = request.args.get("q") or (request.get_json(silent=True) or {}).get("q", "1")
+    user = request.args.get("user", "Karl Albert")
+    cid = request.args.get("cid", "test_user_teams")
+    resp = processar_pergunta_b3(q, user, cid)
+    return jsonify({"pergunta": q, "resposta": resp})
+
 @app.route("/test_voice", methods=["GET"])
 def test_voice():
     text = request.args.get("text", "Fala Karl! O Joca está com voz masculina executiva.")
