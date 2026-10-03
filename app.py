@@ -1366,6 +1366,29 @@ def obter_token_teams():
     return None
 
 
+def formatar_texto_para_teams(texto):
+    """
+    Garante que quebras de linha Markdown renderizem perfeitamente no Microsoft Teams,
+    impedindo que o cliente do Teams junte linhas consecutivas num bloco único de texto.
+    """
+    if not texto:
+        return ""
+    if "<br/>" in texto or "<br>" in texto:
+        return texto
+
+    linhas = texto.split("\n")
+    novas = []
+    for l in linhas:
+        l_s = l.strip()
+        if l_s.startswith("|") and l_s.endswith("|"):
+            novas.append(l)
+        elif not l_s:
+            novas.append("")
+        else:
+            novas.append(l + "  ")
+    return "\n".join(novas)
+
+
 def enviar_mensagem_teams(service_url, conversation_id, text, reply_to_id=None):
     token = obter_token_teams()
     if not token:
@@ -1380,7 +1403,8 @@ def enviar_mensagem_teams(service_url, conversation_id, text, reply_to_id=None):
     }
     body = {
         "type": "message",
-        "text": text
+        "textFormat": "markdown",
+        "text": formatar_texto_para_teams(text)
     }
     if reply_to_id:
         body["replyToId"] = reply_to_id
@@ -1432,18 +1456,16 @@ def formatar_papeis(qtd):
 
 def _gerar_menu_boas_vindas(user_name="Karl"):
     return (
-        f"👋 Olá, {user_name}! Sou o Joca B3.\n"
-        f"Fui idealizado para tirar dúvidas por aqui, integrado ao seu ambiente de trabalho "
-        f"para auxiliá-lo a respeito das informações do Painel B3.\n\n"
-        f"Me guie sobre o que você precisa de informações:\n\n"
-        f"1️⃣ Algum Índice? (Ibovespa ou Mercado Americano)\n"
-        f"2️⃣ Ticker / Ações / Ativos? (Cotação, DY e P/VP dos 102 ativos ativos da B3)\n"
-        f"3️⃣ Alguma Moeda? (Dólar Comercial PTAX)\n"
-        f"4️⃣ Volume ou Preço? (Volumes financeiros e preços de fechamento)\n"
-        f"5️⃣ Algum Indicador Macro? (Taxa Selic, IPCA 12M, IGP-M ou PIB)\n"
-        f"6️⃣ 5 Maiores Altas ou 5 Maiores Baixas? (Destaques do pregão)\n"
-        f"7️⃣ Sobre algum Setor de Atuação? (Os 10 setores oficiais da B3)\n"
-        f"8️⃣ Fluxos de Ativos / Investidores? (Capital Estrangeiro, Institucional e Pessoa Física)\n\n"
+        f"👋 Olá, {user_name}! Sou o Joca B3. Fui idealizado para tirar dúvidas por aqui, integrado ao seu ambiente de trabalho para auxiliá-lo a respeito das informações do Painel B3.<br/>\n"
+        f"Me guie sobre o que você precisa de informações:<br/>\n"
+        f"1️⃣ Algum Índice? (Ibovespa ou Mercado Americano)<br/>\n"
+        f"2️⃣ Ticker / Ações / Ativos? (Cotação, DY e P/VP dos 102 ativos da B3)<br/>\n"
+        f"3️⃣ Alguma Moeda? (Dólar Comercial PTAX)<br/>\n"
+        f"4️⃣ Volume ou Preço? (Volumes financeiros e preços de fechamento)<br/>\n"
+        f"5️⃣ Algum Indicador Macro? (Taxa Selic, IPCA 12M, IGP-M ou PIB)<br/>\n"
+        f"6️⃣ 5 Maiores Altas ou 5 Maiores Baixas? (Destaques do pregão)<br/>\n"
+        f"7️⃣ Sobre algum Setor de Atuação? (Os 10 setores oficiais da B3)<br/>\n"
+        f"8️⃣ Fluxos de Ativos / Investidores? (Capital Estrangeiro, Institucional e Pessoa Física)<br/>\n"
         f"💡 Você pode simplesmente digitar o número correspondente (1 a 8) ou fazer sua pergunta diretamente!"
     )
 
@@ -1808,7 +1830,7 @@ def _tratar_pilar_7_setores(texto):
                 linhas.append(f"• **{r[0]} ({r[1][:18]}):** R$ {r[2]:.2f} ({emoji} {r[3]:+.2f}%)")
 
             return (
-                f"🏢 **Setor: {setor_escolhido} ({len(rows)} ativos ativos) — Pregão de {dt_exib}**\n\n"
+                f"🏢 **Setor: {setor_escolhido} ({len(rows)} ativos) — Pregão de {dt_exib}**\n\n"
                 + "\n".join(linhas) + "\n\n"
                 f"📌 *Dados oficiais do Painel B3 (Dim_Ativos e Fato_B3_tickers).*"
             )
@@ -1840,7 +1862,7 @@ def _tratar_pilar_7_setores(texto):
             f"| Setor Econômico | Ativos | Desempenho Médio |\n"
             f"| :--- | :---: | :---: |\n"
             f"{tab_str}\n\n"
-            f"📌 *Cálculo ponderado sobre os 102 ativos ativos da base oficial do Painel B3.*\n"
+            f"📌 *Cálculo ponderado sobre os 102 ativos da base oficial do Painel B3.*\n"
             f"💡 *Deseja ver os ativos de algum setor? Digite o nome (ex: `Petróleo e Gás`, `Financeiro`, `Saúde`).*"
         )
     finally:
@@ -1994,7 +2016,7 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
         if tickers_encontrados:
             return _tratar_pilar_2_ticker(tickers_encontrados[0])
         return (
-            f"📈 **Consulta de Ações e Ativos (102 ativos ativos no Painel B3)**\n\n"
+            f"📈 **Consulta de Ações e Ativos (102 ativos monitorados no Painel B3)**\n\n"
             f"Por favor, digite o código da ação que deseja consultar.\n"
             f"*Exemplos ativos mais procurados: `PETR4`, `VALE3`, `ITUB4`, `WEGE3`, `BBAS3`.*"
         )
