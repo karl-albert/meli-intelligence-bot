@@ -1214,7 +1214,7 @@ def home():
 def status():
     return jsonify({
         "status": "online",
-        "versao": "3.0.0 - Dual Bot Hub (Joca_BigQuery + Joca_Fabric) + Rate Limiter Anti-Spam",
+        "versao": "3.1.0 - Joca B3 8 Pilares + DuckDB + Teams",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "total_conversas_registradas": len(carregar_conversas()),
