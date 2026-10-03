@@ -53,6 +53,18 @@ TOKEN_MELI = TOKEN_BQ
 env_token_fabric = os.environ.get("TELEGRAM_TOKEN_FABRIC", "").strip()
 TOKEN_FABRIC = env_token_fabric if (env_token_fabric and len(env_token_fabric) > 20) else FALLBACK_TOKEN_FABRIC
 
+# Credenciais Microsoft Teams (Joca_B3)
+_B64_TEAMS_ID = "ZjQ3NmZiMjYtYmFkZS00N2JhLThjMTUtYWY5OGNjY2YzYjZi"
+_B64_TEAMS_SEC = "RUVBOFF+Yk0yUlRydXZQMX5wWEhMQXJacWo2QVAyM2ZWLk5Qd2FPZQ=="
+FALLBACK_TEAMS_ID = base64.b64decode(_B64_TEAMS_ID).decode("utf-8").strip()
+FALLBACK_TEAMS_SEC = base64.b64decode(_B64_TEAMS_SEC).decode("utf-8").strip()
+
+env_teams_id = os.environ.get("TEAMS_BOT_ID", "").strip()
+TEAMS_BOT_ID = env_teams_id if (env_teams_id and len(env_teams_id) > 10) else FALLBACK_TEAMS_ID
+
+env_teams_secret = os.environ.get("TEAMS_CLIENT_SECRET", "").strip()
+TEAMS_CLIENT_SECRET = env_teams_secret if (env_teams_secret and len(env_teams_secret) > 10) else FALLBACK_TEAMS_SEC
+
 # Configuração e Retrocompatibilidade
 TOKEN = TOKEN_MELI
 BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN_BQ}"
@@ -1317,6 +1329,253 @@ def set_all_webhooks():
         "joca_bigquery": {"bot": "Joca_BigQuery", "url": wh_bq, "response": res_bq},
         "joca_fabric": {"bot": "Joca_Fabric", "url": wh_fabric, "response": res_fabric}
     })
+
+
+# ==============================================================================
+# JOCA B3 - CANAL CORPORATIVO MICROSOFT TEAMS (BOLSA B3 & MACROECONOMIA)
+# ==============================================================================
+_teams_token_cache = {"token": None, "expires_at": 0}
+
+def obter_token_teams():
+    now = time.time()
+    if _teams_token_cache["token"] and now < _teams_token_cache["expires_at"]:
+        return _teams_token_cache["token"]
+    
+    url = "https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token"
+    data = {
+        "grant_type": "client_credentials",
+        "client_id": TEAMS_BOT_ID,
+        "client_secret": TEAMS_CLIENT_SECRET,
+        "scope": "https://api.botframework.com/.default"
+    }
+    try:
+        r = requests.post(url, data=data, timeout=10)
+        if r.status_code == 200:
+            res = r.json()
+            token = res.get("access_token")
+            expires_in = res.get("expires_in", 3600)
+            _teams_token_cache["token"] = token
+            _teams_token_cache["expires_at"] = now + expires_in - 300
+            return token
+        else:
+            logger.error(f"Erro ao obter token do Teams: {r.status_code} - {r.text}")
+    except Exception as e:
+        logger.error(f"Exceção ao obter token do Teams: {e}")
+    return None
+
+
+def enviar_mensagem_teams(service_url, conversation_id, text, reply_to_id=None):
+    token = obter_token_teams()
+    if not token:
+        logger.error("Sem token válido do Bot Framework para envio ao Teams.")
+        return False
+    
+    service_url_clean = service_url.rstrip("/")
+    url = f"{service_url_clean}/v3/conversations/{conversation_id}/activities"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    body = {
+        "type": "message",
+        "text": text
+    }
+    if reply_to_id:
+        body["replyToId"] = reply_to_id
+
+    try:
+        r = requests.post(url, headers=headers, json=body, timeout=15)
+        if r.status_code in [200, 201, 202]:
+            logger.info(f"Mensagem entregue com sucesso no Teams ({conversation_id})")
+            return True
+        else:
+            logger.error(f"Erro ao enviar mensagem ao Teams: {r.status_code} - {r.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Exceção ao enviar mensagem ao Teams: {e}")
+        return False
+
+
+def obter_dados_mercado_b3(texto):
+    """Detecta menções a ativos da B3, Ibovespa ou Dólar e busca cotação real."""
+    t = texto.upper()
+    info = []
+    
+    # Dólar Comercial
+    if any(k in t for k in ["DOLAR", "DÓLAR", "USD", "CAMBIO", "CÂMBIO"]):
+        try:
+            r = requests.get("https://economia.awesomeapi.com.br/last/USD-BRL", timeout=4).json()
+            bid = float(r["USDBRL"]["bid"])
+            pct = float(r["USDBRL"]["pctChange"])
+            emoji = "🟢" if pct >= 0 else "🔴"
+            info.append(f"• **Dólar Comercial (USD/BRL):** R$ {bid:.2f} ({emoji} {pct:+.2f}%)")
+        except Exception:
+            pass
+
+    # Ibovespa
+    if any(k in t for k in ["IBOV", "IBOVESPA", "BOLSA"]):
+        try:
+            headers = {"User-Agent": "Mozilla/5.0"}
+            r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/%5EBVSP?range=1d&interval=1d", headers=headers, timeout=4).json()
+            meta = r["chart"]["result"][0]["meta"]
+            preco = meta.get("regularMarketPrice")
+            prev = meta.get("chartPreviousClose")
+            var = ((preco - prev) / prev) * 100 if prev else 0.0
+            emoji = "🟢" if var >= 0 else "🔴"
+            info.append(f"• **Ibovespa (^BVSP):** {preco:,.0f} pts ({emoji} {var:+.2f}%)".replace(",", "."))
+        except Exception:
+            pass
+
+    # Ações da B3 (Regex: 4 letras + 3, 4, 5, 6 ou 11)
+    tickers = re.findall(r'\b[A-Z]{4}(?:3|4|5|6|11)\b', t)
+    nomes_map = {
+        "PETROBRAS": "PETR4", "PETRO": "PETR4",
+        "VALE": "VALE3",
+        "ITAU": "ITUB4", "ITAÚ": "ITUB4",
+        "BRADESCO": "BBDC4",
+        "BANCO DO BRASIL": "BBAS3",
+        "AMBEV": "ABEV3",
+        "WEG": "WEGE3",
+        "MAGALU": "MGLU3", "MAGAZINE LUIZA": "MGLU3"
+    }
+    for nome, tick in nomes_map.items():
+        if nome in t and tick not in tickers:
+            tickers.append(tick)
+
+    headers = {"User-Agent": "Mozilla/5.0"}
+    for tick in set(tickers[:4]):
+        try:
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{tick}.SA?range=1d&interval=1d"
+            r = requests.get(url, headers=headers, timeout=4).json()
+            meta = r["chart"]["result"][0]["meta"]
+            p = meta.get("regularMarketPrice")
+            prev = meta.get("chartPreviousClose")
+            var = ((p - prev) / prev) * 100 if prev else 0.0
+            emoji = "🟢" if var >= 0 else "🔴"
+            info.append(f"• **{tick} (Ação B3):** R$ {p:.2f} ({emoji} {var:+.2f}%)".replace(".", ","))
+        except Exception:
+            pass
+
+    return "\n".join(info) if info else None
+
+
+def processar_pergunta_b3(texto, user_name="Karl"):
+    dados_mercado = obter_dados_mercado_b3(texto)
+    
+    prompt = f"""Você é o Joca B3, consultor executivo de inteligência e analytics do mercado financeiro e da B3 (Brasil, Bolsa, Balcão) integrado ao Microsoft Teams.
+Você presta consultoria executiva, rápida e analítica sobre a bolsa brasileira, cotações de ações, Ibovespa, Dólar e macroeconomia (Selic 10,50%, IPCA, câmbio).
+
+USUÁRIO: {user_name}
+PERGUNTA: "{texto}"
+
+DADOS EM TEMPO REAL CAPTURADOS DA B3/MERCADO AGORA:
+{dados_mercado if dados_mercado else "Nenhum ticker ou índice específico detectado na consulta rápida."}
+
+DIRETRIZES:
+1. Tom: Executivo, profissional, cordial e direto. Não use linguagem infantil ou informalidade excessiva.
+2. Formato: Use Markdown para o Teams (negrito, tópicos, emojis corporativos 📊, 💼, 🟢, 🔴).
+3. Seja conciso e direto: responda à pergunta logo no início.
+4. Se o usuário estiver te cumprimentando, responda com cortesia executiva, apresente-se como Joca B3 e diga brevemente como pode ajudá-lo na tomada de decisão financeira.
+
+Responda agora:"""
+
+    resp = chamar_gemini(prompt)
+    if resp:
+        return resp.strip()
+    
+    if dados_mercado:
+        return f"📊 **Radar de Mercado B3 — Olá {user_name}!**\n\n{dados_mercado}\n\n📌 _Dados em tempo real via B3 & Yahoo Finance._"
+    
+    return f"Olá {user_name}! Sou o **Joca B3**, seu assistente executivo de mercado financeiro no Microsoft Teams. Posso te passar cotações em tempo real de ações (ex: PETR4, VALE3), Ibovespa, Dólar e indicadores macroeconômicos. Em que posso te apoiar hoje?"
+
+
+def _processar_mensagem_teams(activity):
+    try:
+        texto_bruto = activity.get("text", "") or ""
+        texto = re.sub(r'<at>.*?</at>', '', texto_bruto).replace("@Joca", "").strip()
+        if not texto:
+            return
+
+        service_url = activity.get("serviceUrl", "")
+        conversation_id = activity.get("conversation", {}).get("id", "")
+        user_name = activity.get("from", {}).get("name", "Karl")
+        activity_id = activity.get("id")
+
+        t_inicio = time.time()
+        resposta = processar_pergunta_b3(texto, user_name)
+        tempo_total = round(time.time() - t_inicio, 2)
+
+        enviar_mensagem_teams(service_url, conversation_id, resposta, reply_to_id=activity_id)
+
+        # Telemetria para o Power BI
+        try:
+            agora = datetime.now()
+            salvar_conversa({
+                "id": activity_id or int(time.time()),
+                "data_hora": agora.strftime("%Y-%m-%d %H:%M:%S"),
+                "data": agora.strftime("%Y-%m-%d"),
+                "hora": agora.strftime("%H:%M:%S"),
+                "bot": "Joca_B3_Teams",
+                "chat_id": str(conversation_id),
+                "usuario": user_name,
+                "username": activity.get("from", {}).get("id", ""),
+                "tipo_entrada": "Texto (Teams)",
+                "pergunta": texto,
+                "resposta": resposta[:500] if resposta else "",
+                "tempo_resposta_s": tempo_total,
+                "status": "Respondido (Sucesso)"
+            })
+        except Exception as e_log:
+            logger.error(f"Erro ao salvar log de telemetria do Teams: {e_log}")
+
+    except Exception as e:
+        logger.error(f"Erro ao processar mensagem do Teams: {e}")
+
+
+def _tratar_boas_vindas_teams(activity):
+    try:
+        service_url = activity.get("serviceUrl", "")
+        conversation_id = activity.get("conversation", {}).get("id", "")
+        user_name = activity.get("from", {}).get("name", "Karl")
+        
+        msg_bv = (
+            f"Olá, {user_name}! Sou o **Joca B3**, seu consultor executivo de inteligência e analytics "
+            f"da Bolsa de Valores (B3) no Microsoft Teams. 📊\n\n"
+            f"Estou pronto para te apoiar com cotações de ações, fechamento de pregão, Ibovespa, Dólar "
+            f"e indicadores macroeconômicos. Em que posso te ajudar hoje?"
+        )
+        enviar_mensagem_teams(service_url, conversation_id, msg_bv)
+    except Exception as e:
+        logger.error(f"Erro nas boas-vindas do Teams: {e}")
+
+
+@app.route("/api/teams_b3", methods=["GET", "POST"])
+def webhook_teams_b3():
+    if request.method == "GET":
+        return f"""
+        <html>
+        <head><title>Joca B3 - Microsoft Teams</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0b0f19; color: #fff;">
+            <h1>⚡ Joca B3 no Microsoft Teams está ATIVO! 🟢</h1>
+            <p style="color: #94a3b8; font-size: 16px; margin: 20px 0;">Endpoint oficial da IA executiva para mercado financeiro e B3.</p>
+            <p style="color: #38bdf8; font-weight: bold;">Bot ID: {TEAMS_BOT_ID}</p>
+            <p><a href="/" style="color: #38bdf8; text-decoration: none;">← Voltar para o Painel</a></p>
+        </body>
+        </html>
+        """, 200
+
+    payload = request.get_json(silent=True) or {}
+    activity_type = payload.get("type")
+
+    if activity_type == "message":
+        threading.Thread(target=_processar_mensagem_teams, args=(payload,), daemon=True).start()
+        return jsonify({"status": "received"}), 200
+
+    elif activity_type == "conversationUpdate":
+        threading.Thread(target=_tratar_boas_vindas_teams, args=(payload,), daemon=True).start()
+        return jsonify({"status": "update_handled"}), 200
+
+    return jsonify({"status": "ignored"}), 200
 
 
 @app.route("/debug_gemini", methods=["GET"])
