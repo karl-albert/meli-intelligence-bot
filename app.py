@@ -1222,7 +1222,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.2.2 - Joca B3 Layout Pilar 2 Acoes",
+        "versao": "3.2.3 - Joca B3 Layout Ativo Ticker",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "b3_indices_max_data": b3_max_dt,
@@ -1561,12 +1561,11 @@ def _tratar_pilar_2_ticker(ticker):
 
         r = con.execute("SELECT preco, variacao, dy, p_vp, volume, data FROM fato_b3_tickers WHERE ticker = ? ORDER BY data DESC LIMIT 1", [t_up]).fetchone()
         if not r:
-            return f"📈 **{t_up} · {nome}** ({setor})\n⚠️ Sem cotação registrada no último pregão da base."
+            return f"📈 **{t_up} · {nome}** | {setor}\n⚠️ Sem cotação registrada no último pregão da base."
 
         p = r[0]
         var = r[1]
         dy = r[2]
-        p_vp = r[3]
         vol = r[4]
         dt = r[5]
         dt_str = dt.strftime("%d/%m/%Y") if hasattr(dt, "strftime") else str(dt)
@@ -1574,15 +1573,13 @@ def _tratar_pilar_2_ticker(ticker):
         vol_str = formatar_valor_monetario(vol)
 
         dy_str = f"{dy:.2f}%" if dy and dy > 0 else "0,00%"
-        pvp_str = f"{p_vp:.2f}x" if p_vp and p_vp > 0 else "N/D"
 
         return (
-            f"📈 **{t_up} · {nome}** ({setor})\n"
-            f"• **Preço de Fechamento:** R$ {p:.2f} ({emoji} {var:+.2f}%)\n"
+            f"📈 **{t_up} · {nome}** | {setor}\n"
+            f"• **Preço Fechamento:** R$ {p:.2f} ({emoji} {var:+.2f}%)\n"
             f"• **Volume Financeiro:** {vol_str}\n"
             f"• **Dividend Yield (DY):** {dy_str}\n"
-            f"• **P/VP:** {pvp_str}\n"
-            f"📌 *Dados oficiais do Painel B3 (Pregão de {dt_str}).*"
+            f"📌 *Dados do Painel B3 (Pregão de {dt_str}).*"
         )
     finally:
         con.close()
