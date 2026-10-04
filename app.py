@@ -1222,7 +1222,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.2.1 - Joca B3 Alias Dow e Brent",
+        "versao": "3.2.2 - Joca B3 Layout Pilar 2 Acoes",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "b3_indices_max_data": b3_max_dt,
@@ -2040,9 +2040,10 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
         if tickers_encontrados:
             return _tratar_pilar_2_ticker(tickers_encontrados[0])
         return (
-            f"📈 **Consulta de Ações e Ativos (102 ativos monitorados no Painel B3)**\n\n"
-            f"Por favor, digite o código da ação que deseja consultar.\n"
-            f"*Exemplos ativos mais procurados: `PETR4`, `VALE3`, `ITUB4`, `WEGE3`, `BBAS3`.*"
+            f"📈 **Consulta de Ações e Ativos**<br/><br/>\n"
+            f"Por favor, digite o **código/ticker** da ação que deseja consultar.<br/><br/>\n"
+            f"*Exemplos ativos mais procurados:*<br/>\n"
+            f"*PETR4, VALE3, ITUB4, WEGE3, BBAS3.*"
         )
 
     tickers_encontrados = re.findall(r'\b[A-Z]{4}(?:3|4|5|6|11)\b', t_upper)
