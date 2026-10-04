@@ -1222,7 +1222,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.2.4 - Joca B3 Layout Pilar 5 Macro",
+        "versao": "3.2.5 - Joca B3 Layout Indicadores Macro",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "b3_indices_max_data": b3_max_dt,
@@ -1681,20 +1681,37 @@ def _tratar_pilar_5_macro(texto):
             r = con.execute("SELECT data, indicador, valor, unidade FROM fato_macro_diarios WHERE indicador LIKE '%Selic Meta%' ORDER BY data DESC LIMIT 1").fetchone()
             dt_str = r[0].strftime("%d/%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
             return (
-                f"🏦 **Taxa Selic Meta (% a.a.) — Posição em {dt_str}**\n"
-                f"• **Taxa Oficial:** {r[2]:.2f}% a.a.\n"
-                f"• **Fonte:** Banco Central do Brasil (Copom)\n"
-                f"📌 *Tabela oficial: Fato_Macro_Diarios.*"
+                f"🏛️ **Taxa Selic Meta (% a.a.) — Posição em {dt_str}**<br/>\n"
+                f"• **Taxa Oficial:** {r[2]:.2f}% a.a.<br/><br/>\n"
+                f"📌 ***Fonte:*** *Banco Central do Brasil (Copom)*"
             )
 
         if "IPCA" in t or "INFLAÇÃO" in t or "INFLACAO" in t:
             r = con.execute("SELECT data, indicador, valor, unidade FROM fato_macro_mensais WHERE indicador LIKE '%IPCA Acumulado 12%' ORDER BY data DESC LIMIT 1").fetchone()
             dt_str = r[0].strftime("%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
             return (
-                f"🏦 **IPCA Inflação Oficial — Posição em {dt_str}**\n"
-                f"• **Acumulado 12 Meses:** {r[2]:.2f}%\n"
-                f"• **Fonte:** IBGE\n"
-                f"📌 *Tabela oficial: Fato_Macro_Mensais.*"
+                f"🏛️ **IPCA Inflação Oficial — Posição em {dt_str}**<br/>\n"
+                f"• **Acumulado 12 Meses:** {r[2]:.2f}%<br/><br/>\n"
+                f"📌 ***Fonte:*** *IBGE*"
+            )
+
+        if "IGPM" in t or "IGP-M" in t:
+            r = con.execute("SELECT data, indicador, valor, unidade FROM fato_macro_mensais WHERE indicador LIKE '%IGP-M Mensal%' ORDER BY data DESC LIMIT 1").fetchone()
+            dt_str = r[0].strftime("%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
+            return (
+                f"🏛️ **IGP-M Mensal — Posição em {dt_str}**<br/>\n"
+                f"• **Variação Mensal:** {r[2]:.2f}%<br/><br/>\n"
+                f"📌 ***Fonte:*** *FGV*"
+            )
+
+        if "CAGED" in t or "EMPREGO" in t:
+            r = con.execute("SELECT data, indicador, valor, unidade FROM fato_macro_mensais WHERE indicador LIKE '%CAGED Total%' ORDER BY data DESC LIMIT 1").fetchone()
+            dt_str = r[0].strftime("%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
+            vagas = f"{int(r[2]):,}".replace(",", ".")
+            return (
+                f"🏛️ **CAGED Emprego Formal — Posição em {dt_str}**<br/>\n"
+                f"• **Total de Contratações CLT:** {vagas} vagas<br/><br/>\n"
+                f"📌 ***Fonte:*** *Ministério do Trabalho e Emprego (MTE)*"
             )
 
         if "PIB" in t:
@@ -1702,19 +1719,18 @@ def _tratar_pilar_5_macro(texto):
             dt_str = r[0].strftime("%d/%m/%Y") if hasattr(r[0], "strftime") else str(r[0])
             val_tri = r[2] / 1e6
             return (
-                f"🏦 **PIB Trimestral a Preços de Mercado — Posição em {dt_str}**\n"
-                f"• **Valor Apurado:** R$ {val_tri:.2f} trilhões (R$ {r[2]:,.1f} Milhões)\n"
-                f"• **Fonte:** IBGE / BACEN\n"
-                f"📌 *Tabela oficial: Fato_macro_Trimestrais.*"
+                f"🏛️ **PIB Trimestral a Preços de Mercado — Posição em {dt_str}**<br/>\n"
+                f"• **Valor Apurado:** R$ {val_tri:.2f} trilhões (R$ {r[2]:,.1f} Milhões)<br/><br/>\n"
+                f"📌 ***Fonte:*** *IBGE / BACEN*"
             )
 
         if "DI" in t or "CURVA" in t:
             dis = con.execute("SELECT indicador, valor FROM fato_macro_diarios WHERE indicador LIKE '%DI IF%' ORDER BY data DESC LIMIT 5").fetchall()
-            linhas_di = "\n".join([f"• **{d[0]}:** {d[1]:.2f}% a.a." for d in dis])
+            linhas_di = "<br/>\n".join([f"• **{d[0]}:** {d[1]:.2f}% a.a." for d in dis])
             return (
-                f"📈 **Curvas de Juros DI (B3)**\n"
-                f"{linhas_di}\n"
-                f"📌 *Tabela oficial: Fato_Macro_Diarios.*"
+                f"📈 **Curvas de Juros DI (B3)**<br/>\n"
+                f"{linhas_di}<br/><br/>\n"
+                f"📌 ***Fonte:*** *B3*"
             )
 
         selic = con.execute("SELECT valor FROM fato_macro_diarios WHERE indicador LIKE '%Selic Meta%' ORDER BY data DESC LIMIT 1").fetchone()[0]
