@@ -1222,7 +1222,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.2.3 - Joca B3 Layout Ativo Ticker",
+        "versao": "3.2.4 - Joca B3 Layout Pilar 5 Macro",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "b3_indices_max_data": b3_max_dt,
@@ -1723,13 +1723,13 @@ def _tratar_pilar_5_macro(texto):
         pib = con.execute("SELECT valor FROM fato_macro_trimestrais WHERE indicador LIKE '%PIB%' ORDER BY data DESC LIMIT 1").fetchone()[0]
 
         return (
-            f"🏦 **Cenário Macroeconômico Oficial (BACEN / IBGE / FGV)**\n"
-            f"• **Taxa Selic Meta:** {selic:.2f}% a.a. (Copom/BACEN · Diário)\n"
-            f"• **IPCA Acumulado 12 Meses:** {ipca:.2f}% (IBGE · Mensal)\n"
-            f"• **IGP-M Mensal:** {igpm:.2f}% (FGV · Mensal)\n"
-            f"• **PIB Trimestral a Preços de Mercado:** R$ {pib/1e6:.2f} trilhões (IBGE · Trimestral)\n"
-            f"📌 *Dados consolidados das 3 tabelas oficiais: Fato_Macro_Diarios, Fato_Macro_Mensais e Fato_macro_Trimestrais.*\n\n"
-            f"💡 *Deseja detalhar algum indicador específico? Digite: **Selic**, **IPCA**, **IGP-M**, **PIB**, **Curva de DI** ou **CAGED**.*"
+            f"🏛️ **Cenário Macroeconômico Oficial (BACEN / IBGE / FGV)**<br/>\n"
+            f"• **Taxa Selic Meta:** {selic:.2f}% a.a. (Copom/BACEN · Diário)<br/>\n"
+            f"• **IPCA Acumulado 12 Meses:** {ipca:.2f}% (IBGE · Mensal)<br/>\n"
+            f"• **IGP-M Mensal:** {igpm:.2f}% (FGV · Mensal)<br/>\n"
+            f"• **PIB Trimestral a Preços de Mercado:** R$ {pib/1e6:.2f} trilhões (IBGE)<br/><br/>\n"
+            f"💡 *Deseja detalhar algum indicador específico?*<br/>\n"
+            f"*Digite: **Selic**, **IPCA**, **IGP-M**, **PIB**, **Curva de DI** ou **CAGED**.*"
         )
     finally:
         con.close()
