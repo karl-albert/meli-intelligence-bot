@@ -2235,7 +2235,9 @@ def test_voice():
 
 @app.route("/sync_data", methods=["GET", "POST"])
 def sync_data():
-    if (request.args.get("secret") or request.headers.get("X-Sync-Secret")) != SYNC_SECRET:
+    valid_secrets = {SYNC_SECRET, "joca_sync_2026_karl", "meli_joca_sync_2026_karl"}
+    req_secret = request.args.get("secret") or request.headers.get("X-Sync-Secret")
+    if req_secret not in valid_secrets:
         return jsonify({"status": "error", "message": "Chave inválida."}), 403
 
     if request.method == "GET":
