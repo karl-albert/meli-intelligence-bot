@@ -1212,11 +1212,20 @@ def home():
 
 @app.route("/status", methods=["GET"])
 def status():
+    b3_max_dt = None
+    try:
+        con_b3 = get_b3_db()
+        b3_max_dt = str(con_b3.execute("SELECT MAX(data) FROM fato_indices_americanos").fetchone()[0])
+        con_b3.close()
+    except Exception:
+        pass
+
     return jsonify({
         "status": "online",
-        "versao": "3.1.0 - Joca B3 8 Pilares + DuckDB + Teams",
+        "versao": "3.2.0 - Joca B3 8 Pilares + Indices 02/10/2026 + Teams",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
+        "b3_indices_max_data": b3_max_dt,
         "total_conversas_registradas": len(carregar_conversas()),
         "anti_spam": {
             "max_por_usuario_min": rate_limiter.max_per_user,
