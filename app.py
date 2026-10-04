@@ -1222,7 +1222,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.2.0 - Joca B3 8 Pilares + Indices 02/10/2026 + Teams",
+        "versao": "3.2.1 - Joca B3 Alias Dow e Brent",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "b3_indices_max_data": b3_max_dt,
@@ -1484,13 +1484,15 @@ def _tratar_pilar_1_indices(texto):
     con = get_b3_db()
     try:
         mapa_americanos = {
-            "DOW": "^DJI", "DOW JONES": "^DJI",
+            "DOW JONES": "^DJI", "DOW": "^DJI", "DJI": "^DJI",
             "NASDAQ": "^IXIC", "NQ": "^NQGS",
-            "NYSE": "^NYA", "BRENT": "BZ=F", "PETRÓLEO BRENT": "BZ=F", "PETROLEO BRENT": "BZ=F",
-            "OMX": "^OMX"
+            "NYSE": "^NYA", 
+            "PETRÓLEO BRENT": "BZ=F", "PETROLEO BRENT": "BZ=F", "BRENT": "BZ=F",
+            "OMXS30": "^OMX", "OMX": "^OMX"
         }
-        for k, sim in mapa_americanos.items():
-            if k in t:
+        for k in sorted(mapa_americanos.keys(), key=len, reverse=True):
+            if re.search(r'\b' + re.escape(k) + r'\b', t) or k in t:
+                sim = mapa_americanos[k]
                 rows = con.execute("""
                     SELECT data, indice, ticker, preco_fechamento, preco_minimo, preco_maximo 
                     FROM fato_indices_americanos 
@@ -1533,7 +1535,7 @@ def _tratar_pilar_1_indices(texto):
             f"• **Fechamento:** {fech_fmt} pts ({emoji} {var:+.2f}%)<br/><br/>\n"
             f"• **Mín:** {min_fmt} pts | **Máx:** {max_fmt} pts 📌<br/><br/>\n"
             f"💡 Deseja consultar algum índice internacional do painel?<br/>\n"
-            f"Basta digitar: **Dow Jones. Nasdaq. NYSE. Petróleo Brent ou OMXS30.**"
+            f"Basta digitar: **Dow Jones (ou Dow). Nasdaq. NYSE. Petróleo Brent (ou Brent) ou OMXS30.**"
         )
     finally:
         con.close()
@@ -1976,7 +1978,15 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
 
     # 2. Pilares Numéricos Diretos (1 a 8) e Palavras-Gatilho
     # Pilar 1: Índices
-    if t_clean == "1" or any(k in t_upper for k in ["IBOV", "IBOVESPA", "BOVESPA", "DOW JONES", "NASDAQ", "NYSE", "BRENT", "OMX", "ÍNDICE", "INDICE", "ÍNDICES", "INDICES"]):
+    gatilhos_pilar_1 = [
+        "IBOV", "IBOVESPA", "BOVESPA", 
+        "DOW JONES", "DOW", "DJI", 
+        "NASDAQ", "NYSE", 
+        "PETRÓLEO BRENT", "PETROLEO BRENT", "BRENT", 
+        "OMXS30", "OMX", 
+        "ÍNDICE", "INDICE", "ÍNDICES", "INDICES"
+    ]
+    if t_clean == "1" or any(re.search(r'\b' + re.escape(k) + r'\b', t_upper) or k in t_upper for k in gatilhos_pilar_1):
         return _tratar_pilar_1_indices(t_clean)
 
     # Pilar 3: Dólar PTAX
