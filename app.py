@@ -19,7 +19,7 @@ import io
 import re
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 
@@ -195,9 +195,10 @@ con = duckdb.connect()
 data_recente = None
 total_registros = 0
 data_inicio = None
+data_hora_disponibilizado = None
 
 def recarregar_duckdb():
-    global con, data_recente, total_registros, data_inicio
+    global con, data_recente, total_registros, data_inicio, data_hora_disponibilizado
     logger.info(f"Carregando {PARQUET_FILE} no DuckDB...")
     con.execute("DROP TABLE IF EXISTS fato_ml")
     con.execute(f"""
@@ -222,7 +223,19 @@ def recarregar_duckdb():
     data_recente = con.execute("SELECT MAX(data) FROM fato_ml").fetchone()[0]
     total_registros = con.execute("SELECT COUNT(*) FROM fato_ml").fetchone()[0]
     data_inicio = con.execute("SELECT MIN(data) FROM fato_ml").fetchone()[0]
-    logger.info(f"[OK] Base DuckDB pronta: {total_registros:,} registros. Período: {data_inicio} até {data_recente}")
+    
+    # Registra o horario exato em que o dado ficou disponivel para o Bot (Fuso Brasilia UTC-3)
+    try:
+        if os.path.exists(PARQUET_FILE):
+            mtime = os.path.getmtime(PARQUET_FILE)
+            dt_m = datetime.fromtimestamp(mtime, tz=timezone(timedelta(hours=-3)))
+            data_hora_disponibilizado = dt_m.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            data_hora_disponibilizado = datetime.now(timezone(timedelta(hours=-3))).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        data_hora_disponibilizado = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    logger.info(f"[OK] Base DuckDB pronta: {total_registros:,} registros. Periodo: {data_inicio} ate {data_recente}. Disponibilizado em: {data_hora_disponibilizado}")
 
 recarregar_duckdb()
 
@@ -1222,9 +1235,10 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.2.6 - Joca B3 Layout 5 Maiores e 5 Menores",
+        "versao": "3.2.7 - Horario de Disponibilizacao dos Dados",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
+        "horario_disponibilizacao": data_hora_disponibilizado,
         "b3_indices_max_data": b3_max_dt,
         "total_conversas_registradas": len(carregar_conversas()),
         "anti_spam": {
@@ -2244,7 +2258,8 @@ def sync_data():
         return jsonify({
             "status": "ready",
             "total_registros": total_registros,
-            "data_recente": str(data_recente)
+            "data_recente": str(data_recente),
+            "horario_disponibilizacao": data_hora_disponibilizado
         })
 
     if "file" not in request.files or request.files["file"].filename == "":
@@ -2257,7 +2272,8 @@ def sync_data():
             "status": "success",
             "message": "Base de dados atualizada com sucesso no DuckDB!",
             "total_registros": total_registros,
-            "data_recente": str(data_recente)
+            "data_recente": str(data_recente),
+            "horario_disponibilizacao": data_hora_disponibilizado
         }), 200
     except Exception as e:
         logger.error(f"Erro na sincronização: {e}")
