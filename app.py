@@ -1233,12 +1233,26 @@ def status():
     except Exception:
         pass
 
+    # Garante que o horário de disponibilização nunca seja null no retorno
+    horario_bot = data_hora_disponibilizado
+    if not horario_bot:
+        if os.path.exists(PARQUET_FILE):
+            try:
+                mtime = os.path.getmtime(PARQUET_FILE)
+                dt_m = datetime.fromtimestamp(mtime, tz=timezone(timedelta(hours=-3)))
+                horario_bot = dt_m.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                horario_bot = datetime.now(timezone(timedelta(hours=-3))).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            horario_bot = datetime.now(timezone(timedelta(hours=-3))).strftime("%Y-%m-%d %H:%M:%S")
+
     return jsonify({
         "status": "online",
-        "versao": "3.2.7 - Horario de Disponibilizacao dos Dados",
+        "versao": "3.2.8 - Horario_Disponibilizado_Bot Padronizado",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
-        "horario_disponibilizacao": data_hora_disponibilizado,
+        "horario_disponibilizacao": horario_bot,
+        "Horario_Disponibilizado_Bot": horario_bot,
         "b3_indices_max_data": b3_max_dt,
         "total_conversas_registradas": len(carregar_conversas()),
         "anti_spam": {
