@@ -1222,7 +1222,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.2.5 - Joca B3 Layout Indicadores Macro",
+        "versao": "3.2.6 - Joca B3 Layout 5 Maiores e 5 Menores",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "b3_indices_max_data": b3_max_dt,
@@ -1782,7 +1782,10 @@ def _tratar_pilar_6_altas_baixas(texto, user_name):
         if not altas:
             prox = con.execute("SELECT max(data) FROM fato_b3_tickers WHERE data < ?", [dt_str_iso]).fetchone()[0]
             prox_str = prox.strftime("%d/%m/%Y") if prox else "N/D"
-            return f"⚠️ Não houve pregão ou registros em **{dt_exibicao}** (fim de semana ou feriado).\nO pregão útil anterior mais próximo foi em **{prox_str}**."
+            return (
+                f"⚠️ Não houve pregão ou registros em **{dt_exibicao}** (fim de semana ou feriado).<br/><br/>\n"
+                f"O pregão útil anterior mais próximo foi em **{prox_str}**."
+            )
 
         baixas = con.execute("""
             SELECT f.ticker, d.nome_empresa, f.preco, f.variacao 
@@ -1794,26 +1797,31 @@ def _tratar_pilar_6_altas_baixas(texto, user_name):
 
         linhas_altas = []
         for a in altas:
-            linhas_altas.append(f"| **{a[0]}** | {a[1][:20]} | R$ {a[2]:.2f} | 🟢 {a[3]:+.2f}% |")
+            t_pad = f"**{a[0]}**" + " " * max(0, 8 - len(a[0]))
+            n_pad = a[1].strip()[:30].ljust(30)
+            p_pad = f"R$ {a[2]:.2f}".ljust(16)
+            sinal = "+" if a[3] > 0 else ""
+            v_pad = f"🟢 {sinal}{a[3]:.2f}%".ljust(16)
+            linhas_altas.append(f"| {t_pad} | {n_pad} | {p_pad} | {v_pad} |<br/>")
 
         linhas_baixas = []
         for b in baixas:
-            linhas_baixas.append(f"| **{b[0]}** | {b[1][:20]} | R$ {b[2]:.2f} | 🔴 {b[3]:+.2f}% |")
+            t_pad = f"**{b[0]}**" + " " * max(0, 8 - len(b[0]))
+            n_pad = b[1].strip()[:30].ljust(30)
+            p_pad = f"R$ {b[2]:.2f}".ljust(16)
+            v_pad = f"🔴 {b[3]:.2f}%".ljust(16)
+            linhas_baixas.append(f"| {t_pad} | {n_pad} | {p_pad} | {v_pad} |<br/>")
 
         tab_altas = "\n".join(linhas_altas)
         tab_baixas = "\n".join(linhas_baixas)
 
         return (
-            f"🏆 **Destaques do Pregão B3 — Pregão de {dt_exibicao}**\n\n"
-            f"🟢 **Top 5 Maiores Altas:**\n"
-            f"| Ticker | Empresa | Fechamento | Variação % |\n"
-            f"| :--- | :--- | :--- | :--- |\n"
-            f"{tab_altas}\n\n"
-            f"🔴 **Top 5 Maiores Baixas:**\n"
-            f"| Ticker | Empresa | Fechamento | Variação % |\n"
-            f"| :--- | :--- | :--- | :--- |\n"
-            f"{tab_baixas}\n\n"
-            f"📌 *Dados oficiais extraídos da Fato_B3_tickers para a data {dt_exibicao}.*"
+            f"🏆 **Destaques do Pregão B3 — Pregão de {dt_exibicao}**<br/><br/>\n"
+            f"🟢 **Top 5 Maiores Altas:**<br/>\n"
+            f"{tab_altas}<br/>\n"
+            f"🔴 **Top 5 Maiores Baixas:**<br/>\n"
+            f"{tab_baixas}<br/>\n"
+            f"📌 *Dados do Painel B3 (Pregão de {dt_exibicao}).*"
         )
     finally:
         con.close()
@@ -2023,13 +2031,18 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
         return _tratar_pilar_5_macro(t_clean)
 
     # Pilar 6: 5 Altas e 5 Baixas
-    if t_clean == "6" or any(k in t_upper for k in ["MAIORES ALTAS", "TOP ALTAS", "MAIORES BAIXAS", "TOP BAIXAS", "DESTAQUES DO DIA", "RANKING"]):
+    gatilhos_pilar_6 = [
+        "MAIORES ALTAS", "TOP ALTAS", "MAIORES BAIXAS", "TOP BAIXAS",
+        "5 MAIORES", "5 MENORES", "MAIORES", "MENORES",
+        "DESTAQUES DO DIA", "DESTAQUES", "RANKING"
+    ]
+    if t_clean == "6" or any(k in t_upper for k in gatilhos_pilar_6):
         match_data = re.search(r'(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2}|HOJE|ONTEM)', t_upper)
         if match_data and t_clean != "6":
             return _tratar_pilar_6_altas_baixas(match_data.group(1), user_name)
         b3_conversation_states[conversation_id] = {"action": "awaiting_date_for_ranking", "timestamp": time.time()}
         return (
-            f"📅 **De qual data você deseja consultar as Maiores Altas e Baixas?**\n\n"
+            f"📅 **De qual data você deseja consultar as Maiores Altas e Baixas?**<br/><br/>\n"
             f"Por favor, envie a data desejada (exemplo: `02/10/2026`) ou digite **hoje** para o último pregão disponível na base."
         )
 
