@@ -2269,29 +2269,66 @@ def sync_data():
         return jsonify({"status": "error", "message": "Chave inválida."}), 403
 
     if request.method == "GET":
+        b3_ibov_dt = "N/D"
+        try:
+            b3_c = duckdb.connect(B3_DB_PATH, read_only=True)
+            b3_ibov_dt = str(b3_c.execute("SELECT max(data) FROM fato_b3_ibov").fetchone()[0])
+            b3_c.close()
+        except Exception:
+            pass
+
         return jsonify({
             "status": "ready",
-            "total_registros": total_registros,
-            "data_recente": str(data_recente),
+            "total_registros_meli": total_registros,
+            "data_recente_meli": str(data_recente),
+            "data_recente_b3_ibov": b3_ibov_dt,
             "horario_disponibilizacao": data_hora_disponibilizado
         })
 
     if "file" not in request.files or request.files["file"].filename == "":
         return jsonify({"status": "error", "message": "Nenhum arquivo enviado."}), 400
 
-    try:
-        request.files["file"].save(PARQUET_FILE)
-        recarregar_duckdb()
-        return jsonify({
-            "status": "success",
-            "message": "Base de dados atualizada com sucesso no DuckDB!",
-            "total_registros": total_registros,
-            "data_recente": str(data_recente),
-            "horario_disponibilizacao": data_hora_disponibilizado
-        }), 200
-    except Exception as e:
-        logger.error(f"Erro na sincronização: {e}")
-        return jsonify({"status": "error", "message": str(e)}), 500
+    target = (request.args.get("target") or "").strip().lower()
+    fname = (request.files["file"].filename or "").strip().lower()
+
+    if target == "b3" or fname.endswith(".duckdb"):
+        try:
+            request.files["file"].save(B3_DB_PATH)
+            b3_con = duckdb.connect(B3_DB_PATH, read_only=True)
+            max_ibov = b3_con.execute("SELECT max(data) FROM fato_b3_ibov").fetchone()[0]
+            max_tick = b3_con.execute("SELECT max(data) FROM fato_b3_tickers").fetchone()[0]
+            total_tickers = b3_con.execute("SELECT count(*) FROM fato_b3_tickers").fetchone()[0]
+            b3_con.close()
+            hr_now = datetime.now(BRT_TZ).strftime("%d/%m/%Y %H:%M:%S")
+            logger.info(f"✅ [SYNC B3] Base DuckDB B3 atualizada com sucesso! Max Ibov: {max_ibov}, Tickers: {max_tick}, Total: {total_tickers}")
+            return jsonify({
+                "status": "success",
+                "target": "b3",
+                "message": "Base B3 (b3_database.duckdb) sincronizada com sucesso no Render!",
+                "data_recente_ibov": str(max_ibov),
+                "data_recente_tickers": str(max_tick),
+                "total_tickers": total_tickers,
+                "horario_sync": hr_now
+            }), 200
+        except Exception as e:
+            logger.error(f"Erro na sincronização B3: {e}")
+            return jsonify({"status": "error", "target": "b3", "message": str(e)}), 500
+    else:
+        try:
+            request.files["file"].save(PARQUET_FILE)
+            recarregar_duckdb()
+            return jsonify({
+                "status": "success",
+                "target": "mercadolivre",
+                "message": "Base de dados atualizada com sucesso no DuckDB!",
+                "total_registros": total_registros,
+                "data_recente": str(data_recente),
+                "horario_disponibilizacao": data_hora_disponibilizado
+            }), 200
+        except Exception as e:
+            logger.error(f"Erro na sincronização: {e}")
+            return jsonify({"status": "error", "message": str(e)}), 500
+
 
 
 # ==============================================================================
