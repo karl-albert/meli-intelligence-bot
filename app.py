@@ -1430,19 +1430,17 @@ def formatar_texto_para_teams(texto):
     """
     if not texto:
         return ""
-    if "<br/>" in texto or "<br>" in texto:
-        return texto
 
     linhas = texto.split("\n")
     novas = []
     for l in linhas:
         l_s = l.strip()
-        if l_s.startswith("|") and l_s.endswith("|"):
+        if not l_s:
+            novas.append("<br/>")
+        elif l_s.endswith("<br/>") or l_s.endswith("<br>"):
             novas.append(l)
-        elif not l_s:
-            novas.append("")
         else:
-            novas.append(l + "  ")
+            novas.append(l + "  <br/>")
     return "\n".join(novas)
 
 
@@ -2084,7 +2082,7 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
         "5 MAIORES", "5 MENORES", "MAIORES", "MENORES",
         "DESTAQUES DO DIA", "DESTAQUES", "RANKING"
     ]
-    if t_clean == "6" or any(k in t_upper for k in gatilhos_pilar_6):
+    if t_clean == "6" or t_clean.startswith("6 ") or t_clean.startswith("6-") or any(k in t_upper for k in gatilhos_pilar_6):
         match_data = re.search(r'(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2}|HOJE|ONTEM)', t_upper)
         if match_data and t_clean != "6":
             return _tratar_pilar_6_altas_baixas(match_data.group(1), user_name)
