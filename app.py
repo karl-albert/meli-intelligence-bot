@@ -68,6 +68,11 @@ TEAMS_BOT_ID = env_teams_id if (env_teams_id and len(env_teams_id) > 10) else FA
 env_teams_secret = os.environ.get("TEAMS_CLIENT_SECRET", "").strip()
 TEAMS_CLIENT_SECRET = env_teams_secret if (env_teams_secret and len(env_teams_secret) > 10) else FALLBACK_TEAMS_SEC
 
+# Credenciais WhatsApp Meta Cloud API Oficial (Joca_B3)
+WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+WHATSAPP_VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "joca_b3_meta_2026").strip()
+
 # Configuração e Retrocompatibilidade
 TOKEN = TOKEN_MELI
 BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN_BQ}"
@@ -2467,6 +2472,152 @@ def webhook_teams_b3():
         return jsonify({"status": "update_handled"}), 200
 
     return jsonify({"status": "ignored"}), 200
+
+
+# ==============================================================================
+# 7. INTEGRAÇÃO OFICIAL WHATSAPP (META CLOUD API) - JOCA B3
+# ==============================================================================
+def formatar_texto_para_whatsapp(texto):
+    """Limpa tags HTML como <br/> e adapta negritos/formatos para WhatsApp padrão."""
+    if not texto:
+        return ""
+    # Substitui <br/> e <br> por quebras de linha
+    t = re.sub(r'<br\s*/?>', '\n', texto, flags=re.IGNORECASE)
+    # Substitui negritos Markdown duplos **texto** por *texto* do WhatsApp
+    t = re.sub(r'\*\*(.*?)\*\*', r'*\1*', t)
+    return t.strip()
+
+
+def enviar_mensagem_whatsapp(to_number, text):
+    """Envia mensagem de texto para o WhatsApp via Meta Cloud API Oficial"""
+    if not WHATSAPP_TOKEN or not WHATSAPP_PHONE_NUMBER_ID:
+        logger.warning("WHATSAPP_TOKEN ou WHATSAPP_PHONE_NUMBER_ID nao configurados.")
+        return False
+
+    url = f"https://graph.facebook.com/v19.0/{WHATSAPP_PHONE_NUMBER_ID}/messages"
+    headers = {
+        "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_number,
+        "type": "text",
+        "text": {
+            "preview_url": False,
+            "body": formatar_texto_para_whatsapp(text)
+        }
+    }
+    try:
+        r = requests.post(url, headers=headers, json=payload, timeout=15)
+        if r.status_code in [200, 201]:
+            logger.info(f"Mensagem enviada com sucesso no WhatsApp para {to_number}")
+            return True
+        else:
+            logger.error(f"Erro ao enviar WhatsApp: {r.status_code} - {r.text}")
+            return False
+    except Exception as e:
+        logger.error(f"Excecao ao enviar WhatsApp: {e}")
+        return False
+
+
+def _processar_mensagem_whatsapp(payload):
+    """Executado em segundo plano para processar mensagens recebidas no WhatsApp"""
+    try:
+        entries = payload.get("entry", [])
+        for entry in entries:
+            changes = entry.get("changes", [])
+            for change in changes:
+                value = change.get("value", {})
+                contacts = value.get("contacts", [])
+                messages = value.get("messages", [])
+                
+                user_name = contacts[0].get("profile", {}).get("name", "Investidor") if contacts else "Investidor"
+                
+                for msg in messages:
+                    from_number = msg.get("from")
+                    msg_type = msg.get("type")
+                    texto = None
+                    
+                    if msg_type == "text":
+                        texto = msg.get("text", {}).get("body", "").strip()
+                    elif msg_type == "audio" or msg_type == "voice":
+                        # Áudio do WhatsApp
+                        audio_id = msg.get("audio", {}).get("id") or msg.get("voice", {}).get("id")
+                        if audio_id and WHATSAPP_TOKEN:
+                            try:
+                                # 1. Obter URL da mídia
+                                meta_media_url = f"https://graph.facebook.com/v19.0/{audio_id}"
+                                r_m = requests.get(meta_media_url, headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"}, timeout=10)
+                                if r_m.status_code == 200:
+                                    media_download_url = r_m.json().get("url")
+                                    mime_type = r_m.json().get("mime_type", "audio/ogg")
+                                    # 2. Baixar áudio
+                                    r_audio = requests.get(media_download_url, headers={"Authorization": f"Bearer {WHATSAPP_TOKEN}"}, timeout=20)
+                                    if r_audio.status_code == 200:
+                                        texto = transcrever_audio(r_audio.content, mime_type)
+                            except Exception as e_wa_audio:
+                                logger.error(f"Erro ao baixar/transcrever audio WhatsApp: {e_wa_audio}")
+
+                    if not texto:
+                        continue
+
+                    t_inicio = time.time()
+                    conversation_id = f"wa_{from_number}"
+                    resposta = processar_pergunta_b3(texto, user_name, conversation_id)
+                    t_duracao = round(time.time() - t_inicio, 2)
+                    
+                    enviar_mensagem_whatsapp(from_number, resposta)
+
+                    # Telemetria para o Power BI
+                    try:
+                        agora = datetime.now()
+                        salvar_conversa({
+                            "id": msg.get("id") or int(time.time()),
+                            "data_hora": agora.strftime("%Y-%m-%d %H:%M:%S"),
+                            "data": agora.strftime("%Y-%m-%d"),
+                            "hora": agora.strftime("%H:%M:%S"),
+                            "bot": "Joca_B3_WhatsApp",
+                            "chat_id": str(from_number),
+                            "usuario": user_name,
+                            "username": f"+{from_number}",
+                            "tipo_entrada": "Voz (WhatsApp)" if msg_type in ["audio", "voice"] else "Texto (WhatsApp)",
+                            "pergunta": texto,
+                            "resposta": resposta[:500] if resposta else "",
+                            "tempo_resposta_s": t_duracao,
+                            "status": "Respondido (Sucesso)"
+                        })
+                    except Exception as e_log_wa:
+                        logger.error(f"Erro ao salvar telemetria WhatsApp: {e_log_wa}")
+
+    except Exception as e_proc_wa:
+        logger.error(f"Erro no processamento de webhook WhatsApp: {e_proc_wa}")
+
+
+@app.route("/api/whatsapp_b3", methods=["GET", "POST"])
+def webhook_whatsapp_b3():
+    # Validação do Webhook pela Meta (GET)
+    if request.method == "GET":
+        mode = request.args.get("hub.mode")
+        token = request.args.get("hub.verify_token")
+        challenge = request.args.get("hub.challenge")
+
+        if mode == "subscribe" and token == WHATSAPP_VERIFY_TOKEN:
+            logger.info("Webhook WhatsApp validado com sucesso pela Meta!")
+            return challenge, 200
+        else:
+            logger.warning(f"Falha na verificacao do Webhook WhatsApp: token={token}")
+            return "Forbidden", 403
+
+    # Recebimento de mensagens (POST)
+    payload = request.get_json(silent=True) or {}
+    if payload.get("object") == "whatsapp_business_account":
+        threading.Thread(target=_processar_mensagem_whatsapp, args=(payload,), daemon=True).start()
+        return jsonify({"status": "EVENT_RECEIVED"}), 200
+
+    return jsonify({"status": "ignored"}), 200
+
 
 
 @app.route("/debug_gemini", methods=["GET"])
