@@ -479,22 +479,27 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
         t_inicio = time.time()
         requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "typing"}, timeout=5)
 
-        # Roteamento Inteligente: Tenta Meli/BigQuery; se for None ou contiver ativos/mercado B3, consulta o motor B3
-        resposta = processar_pergunta(texto, user_name)
-        if not resposta:
-            resposta_b3 = processar_pergunta_b3(texto, user_name)
-            if resposta_b3 and "👋 Olá, " not in resposta_b3:
-                resposta = resposta_b3
-            elif any(k in texto.lower() for k in ["b3", "bolsa", "ibov", "dolar", "dólar", "selic", "ipca", "igpm", "pib", "fluxo", "ação", "acoes", "ações", "petr4", "vale3", "itub4"]):
-                resposta = resposta_b3
+        # Separação Estrita de Responsabilidade: Telegram = Joca Mercado Livre (100% ML)
+        t_lower = texto.lower()
+        if any(re.search(r'\b' + re.escape(tk) + r'\b', t_lower) for tk in ["petr4", "vale3", "itub4", "bbdc4", "wege3", "ibov", "ibovespa", "ptax", "selic", "ipca", "igpm", "pib b3"]):
+            resposta = (
+                f"🤖 *Olá {user_name}! Eu sou o Joca Mercado Livre.*\n\n"
+                f"Meu escopo é exclusivamente **Inteligência de Vendas e Produtos do Mercado Livre**.\n\n"
+                f"💡 Para consultar cotações de ações (como `{texto}`), Ibovespa, Dólar, Selic e indicadores da Bolsa, "
+                f"acesse o **Joca B3 no Microsoft Teams**!"
+            )
+        else:
+            resposta = processar_pergunta(texto, user_name)
 
         if not resposta:
             resposta = (
                 f"🤖 *{bot_label}*\n"
-                f"Não consegui processar a consulta para: _\"{texto}\"_\n\n"
-                f"💡 *Exemplos que você pode perguntar:*\n"
-                f"• *Mercado Livre:* _\"Total de vendas no MTD\"_, _\"Faturamento por categoria\"_\n"
-                f"• *B3 / Mercado Financeiro:* _\"PETR4\"_, _\"Cotação da Vale\"_, _\"Dólar hoje\"_, _\"Taxa Selic\"_, _\"Top 5 altas\"_"
+                f"Não consegui processar a consulta de vendas para: _\"{texto}\"_\n\n"
+                f"💡 *Exemplos de perguntas sobre o Mercado Livre:*\n"
+                f"• _\"Total de vendas no MTD\"_\n"
+                f"• _\"Faturamento de hoje por categoria\"_\n"
+                f"• _\"Quais os produtos mais vendidos de Celulares?\"_\n"
+                f"• _\"Faturamento acumulado no ano (YTDA)\"_"
             )
 
         enviar_mensagem(chat_id, resposta, base_url=base_url)
@@ -2201,6 +2206,15 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
     # 1. Saudação & Menu Geral
     if t_upper in gatilhos_menu or t_upper == "@JOCA" or t_upper == "@JOCA B3":
         return _gerar_menu_boas_vindas(user_name)
+
+    # Separação Estrita de Responsabilidade: Teams = Joca B3 (100% Bolsa Brasileira)
+    t_lower = t_clean.lower()
+    if any(k in t_lower for k in ["mercado livre", "meli", "faturamento mtd", "faturamento ytda", "mais vendidos celular", "categoria eletrodomestico", "subcategoria", "is_full", "frete gratis ml"]):
+        return (
+            f"👋 **Olá {user_name}! Eu sou o Joca B3.**\n\n"
+            f"Meu escopo é exclusivamente a **Bolsa de Valores Brasileira (B3)**, cotações de ações, indicadores econômicos, fluxo de investidores e índices.\n\n"
+            f"💡 Dúvidas sobre **vendas, produtos e faturamento do Mercado Livre** são respondidas pelo robô **Joca Mercado Livre no Telegram**!"
+        )
 
     # 2. Resposta de Conceitos e Glossário do Mercado Financeiro
     resp_conc = responder_conceito_b3(t_clean, user_name)
