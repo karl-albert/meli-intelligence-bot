@@ -2394,6 +2394,16 @@ def juca_test_alerta_api():
         return jsonify({"status": "error", "message": str(e)}), 500
 
 
+@app.route("/api/juca/diagnostico", methods=["GET"])
+def juca_diagnostico_api():
+    try:
+        from juca_supervisor import juca
+        diag = juca.diagnosticar_problemas_profundo()
+        return jsonify({"status": "success", "diagnostico": diag}), 200
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+
 # Inicializa a thread de vigilância autônoma do Juca
 try:
     from juca_supervisor import iniciar_vigilancia_background

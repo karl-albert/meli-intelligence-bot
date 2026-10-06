@@ -1,24 +1,5 @@
 {
-  "incidentes": {
-    "mercadolivre": {
-      "pipeline": "mercadolivre",
-      "nome": "Mercado Livre · Mais Vendidos & Inteligência",
-      "motivo_original": "Agendamento das 23:00 não executou (Atraso de 128 min, tolerância de 30 min)",
-      "primeiro_disparo": "2026-10-03T01:08:25.288987-03:00",
-      "status": "AUTO_HEALING_DISPARADO",
-      "disparo_sucesso": false,
-      "escalonado_karl": false
-    },
-    "mp": {
-      "pipeline": "mp",
-      "nome": "Ministério Público · Supabase",
-      "motivo_original": "Agendamento das 22:30 não executou (Atraso de 158 min, tolerância de 45 min)",
-      "primeiro_disparo": "2026-10-03T01:08:25.288987-03:00",
-      "status": "AUTO_HEALING_DISPARADO",
-      "disparo_sucesso": false,
-      "escalonado_karl": false
-    }
-  },
+  "incidentes": {},
   "historico_acoes": [
     {
       "data_hora": "2026-10-03 01:08:25",
@@ -31,8 +12,39 @@
       "pipeline": "mp",
       "evento": "AUTO_HEAL_DISPARADO",
       "detalhe": "Juca disparou carga-mp.yml após detectar Agendamento das 22:30 não executou (Atraso de 158 min, tolerância de 45 min)"
+    },
+    {
+      "data_hora": "2026-10-05 23:12:27",
+      "pipeline": "mercadolivre",
+      "evento": "RECUPERADO_SUCESSO",
+      "detalhe": "Pipeline voltou ao status VERDE após 1 tentativa(s)."
+    },
+    {
+      "data_hora": "2026-10-05 23:12:27",
+      "pipeline": "mp",
+      "evento": "RECUPERADO_SUCESSO",
+      "detalhe": "Pipeline voltou ao status VERDE após 1 tentativa(s)."
     }
   ],
-  "ultimo_check": "2026-10-03 01:11:36",
-  "status_geral": "ALERTA"
+  "ultimo_check": "2026-10-05 23:12:27",
+  "status_geral": "OPERACIONAL_VERDE",
+  "saude_bots": {
+    "render_online": true,
+    "render_latencia_ms": 508,
+    "render_status_code": 200,
+    "data_recente_ml": "2026-10-05",
+    "data_recente_b3": "2026-10-06",
+    "total_registros_ml": 160750,
+    "webhook_bq_ok": true,
+    "webhook_bq_pending": 0,
+    "webhook_bq_erro": null,
+    "webhook_fabric_ok": true,
+    "webhook_fabric_pending": 0,
+    "webhook_fabric_erro": null,
+    "teste_sintetico_b3_ok": true,
+    "teste_sintetico_b3_resumo": "📊 **Dow Jones Industrial Average (^DJI) | Pregão de 05/10/2026**<br/><br/>",
+    "data_esperada_mercado": "2026-10-05",
+    "anomalias": [],
+    "auto_cura_aplicada": []
+  }
 }
