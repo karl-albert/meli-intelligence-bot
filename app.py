@@ -1228,10 +1228,23 @@ def home():
 
 @app.route("/status", methods=["GET"])
 def status():
-    b3_max_dt = None
+    b3_indices_eua_dt = None
+    b3_tickers_dt = None
+    b3_ibov_dt = None
     try:
         con_b3 = get_b3_db()
-        b3_max_dt = str(con_b3.execute("SELECT MAX(data) FROM fato_indices_americanos").fetchone()[0])
+        try:
+            b3_indices_eua_dt = str(con_b3.execute("SELECT MAX(data) FROM fato_indices_americanos").fetchone()[0])
+        except Exception:
+            pass
+        try:
+            b3_tickers_dt = str(con_b3.execute("SELECT MAX(data) FROM fato_b3_tickers").fetchone()[0])
+        except Exception:
+            pass
+        try:
+            b3_ibov_dt = str(con_b3.execute("SELECT MAX(data) FROM fato_b3_ibov").fetchone()[0])
+        except Exception:
+            pass
         con_b3.close()
     except Exception:
         pass
@@ -1251,12 +1264,15 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.2.8 - Horario_Disponibilizado_Bot Padronizado",
+        "versao": "3.3.0 - Auditoria Dupla B3 (Acoes e Indices EUA)",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "horario_disponibilizacao": horario_bot,
         "Horario_Disponibilizado_Bot": horario_bot,
-        "b3_indices_max_data": b3_max_dt,
+        "b3_indices_max_data": b3_indices_eua_dt,
+        "b3_indices_eua_max_data": b3_indices_eua_dt,
+        "b3_tickers_max_data": b3_tickers_dt,
+        "b3_ibov_max_data": b3_ibov_dt,
         "total_conversas_registradas": len(carregar_conversas()),
         "anti_spam": {
             "max_por_usuario_min": rate_limiter.max_per_user,
@@ -1265,7 +1281,8 @@ def status():
         },
         "bots": {
             "bigquery": "Joca_BigQuery",
-            "fabric": "Joca_Fabric"
+            "fabric": "Joca_Fabric",
+            "b3_teams": "Joca_B3"
         }
     })
 
@@ -1578,7 +1595,7 @@ def _tratar_pilar_2_ticker(ticker):
         t_up = ticker.upper()
         ativo = con.execute("SELECT ticker, nome_empresa, setor_atuacao, ticker_inativo FROM dim_ativos WHERE ticker = ?", [t_up]).fetchone()
         if not ativo:
-            ativo = con.execute("SELECT ticker, nome_empresa, setor_economico, ticker_inativo FROM dim_ativos_board WHERE ticker = ?", [t_up]).fetchone()
+            ativo = con.execute("SELECT ticker, nome_empresa, setor_atuacao, ticker_inativo FROM dim_ativos_board WHERE ticker = ?", [t_up]).fetchone()
 
         if not ativo:
             return f"⚠️ O ticker **{t_up}** não foi encontrado na base de ativos oficiais do Painel B3."
@@ -2243,11 +2260,17 @@ def test_ai():
 
 @app.route("/test_b3", methods=["GET", "POST"])
 def test_b3():
-    q = request.args.get("q") or (request.get_json(silent=True) or {}).get("q", "1")
-    user = request.args.get("user", "Karl Albert")
-    cid = request.args.get("cid", "test_user_teams")
-    resp = processar_pergunta_b3(q, user, cid)
-    return jsonify({"pergunta": q, "resposta": resp})
+    try:
+        q = request.args.get("q") or (request.get_json(silent=True) or {}).get("q", "1")
+        user = request.args.get("user", "Karl Albert")
+        cid = request.args.get("cid", "test_user_teams")
+        resp = processar_pergunta_b3(q, user, cid)
+        return jsonify({"pergunta": q, "resposta": resp})
+    except Exception as e:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(f"Erro ao processar /test_b3: {e}\n{tb}")
+        return jsonify({"status": "error", "message": str(e), "traceback": tb}), 500
 
 @app.route("/test_voice", methods=["GET"])
 def test_voice():
