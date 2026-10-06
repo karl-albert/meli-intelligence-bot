@@ -23,6 +23,9 @@ from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify
 import google.generativeai as genai
 
+# Fuso horário oficial de Brasília (BRT UTC-3)
+BRT_TZ = timezone(timedelta(hours=-3))
+
 
 # ==============================================================================
 # 1. CONFIGURAÇÕES DE LOG E FLASK
