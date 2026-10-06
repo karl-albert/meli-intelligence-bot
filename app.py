@@ -57,8 +57,8 @@ env_token_fabric = os.environ.get("TELEGRAM_TOKEN_FABRIC", "").strip()
 TOKEN_FABRIC = env_token_fabric if (env_token_fabric and len(env_token_fabric) > 20) else FALLBACK_TOKEN_FABRIC
 
 # Credenciais Microsoft Teams (Joca_B3)
-_B64_TEAMS_ID = "ZjQ3NmZiMjYtYmFkZS00N2JhLThjMTUtYWY5OGNjY2YzYjZi"
-_B64_TEAMS_SEC = "RUVBOFF+Yk0yUlRydXZQMX5wWEhMQXJacWo2QVAyM2ZWLk5Qd2FPZQ=="
+_B64_TEAMS_ID = "YmRmYzI1MjYtNjczYS00YWU5LWExMjEtM2U2YTc4MmE1NTlk"
+_B64_TEAMS_SEC = "bTJCOFF+ZFVpdVEySHlFMElsMjQtUy5COWdDYVhjMS5RSFlVRWFPdg=="
 FALLBACK_TEAMS_ID = base64.b64decode(_B64_TEAMS_ID).decode("utf-8").strip()
 FALLBACK_TEAMS_SEC = base64.b64decode(_B64_TEAMS_SEC).decode("utf-8").strip()
 

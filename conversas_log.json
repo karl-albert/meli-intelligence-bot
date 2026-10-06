@@ -148,5 +148,35 @@
     "resposta": "📊 Olá Karl! Pesquisei aqui vejamos o resultado:\n📦 Produtos Full representam 68,4% das vendas estimadas.\n🚚 Produtos com Frete Grátis representam 74,2% dos pedidos.\n📌 Dados da base do Base Analítica (Power BI) · Atualizado até 2026-10-01",
     "tempo_resposta_s": 1.4,
     "status": "Sucesso"
+  },
+  {
+    "id": 999,
+    "data_hora": "2026-10-06 11:38:46",
+    "data": "2026-10-06",
+    "hora": "11:38:46",
+    "bot": "Joca_Fabric",
+    "chat_id": "123456",
+    "usuario": "Karl",
+    "username": "-",
+    "tipo_entrada": "Texto",
+    "pergunta": "PETR4",
+    "resposta": "📈 **PETR4 · Petrobras S.A.** (Petróleo e Gás)\n• **Preço de Fechamento:** R$ 55.73 (🟢 +R$ 4.56 | +8.91%)\n• **Volume Financeiro:** R$ 54.3 milhões\n• **Volume de Papéis:** 974.8 mil ações negociadas\n📌 *Dados oficiais do Painel B3 (Pregão de 05/10/2026).*",
+    "tempo_resposta_s": 16.15,
+    "status": "Sucesso"
+  },
+  {
+    "id": 1000,
+    "data_hora": "2026-10-06 11:38:52",
+    "data": "2026-10-06",
+    "hora": "11:38:52",
+    "bot": "Joca_Fabric",
+    "chat_id": "123456",
+    "usuario": "Karl",
+    "username": "-",
+    "tipo_entrada": "Texto",
+    "pergunta": "quanto fechou a Petrobras hoje?",
+    "resposta": "📈 **PETR4 · Petrobras S.A.** (Petróleo e Gás)\n• **Preço de Fechamento:** R$ 55.73 (🟢 +R$ 4.56 | +8.91%)\n• **Volume Financeiro:** R$ 54.3 milhões\n• **Volume de Papéis:** 974.8 mil ações negociadas\n📌 *Dados oficiais do Painel B3 (Pregão de 05/10/2026).*",
+    "tempo_resposta_s": 5.85,
+    "status": "Sucesso"
   }
 ]
