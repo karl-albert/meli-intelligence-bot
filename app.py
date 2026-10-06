@@ -1697,11 +1697,11 @@ def _tratar_pilar_3_dolar():
         emoji = "🟢" if var >= 0 else "🔴"
 
         return (
-            f"💵 **Dólar Comercial (USD/BRL PTAX) — Pregão de {dt_str}**\n"
+            f"💵 **Dólar Comercial (USD/BRL PTAX) | Pregão de {dt_str}**\n"
             f"• **Cotação Oficial (Venda):** R$ {venda:.2f} ({emoji} {var:+.2f}%)\n"
-            f"• **Compra:** R$ {compra:.4f}  |  **Venda:** R$ {venda:.4f}\n"
+            f"• **Compra:** R$ {compra:.4f} | **Venda:** R$ {venda:.4f}\n"
             f"• **Faixa do Dia:** Mín: R$ {min_d:.4f} — Máx: R$ {max_d:.4f}\n"
-            f"📌 *Dados oficiais da tabela Fato_B3_dolar.*"
+            f"📌 *Dados do Painel B3 (Pregão de {dt_str}).*"
         )
     finally:
         con.close()
