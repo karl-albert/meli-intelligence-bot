@@ -1407,34 +1407,41 @@ def set_all_webhooks():
 # ==============================================================================
 # JOCA B3 - CANAL CORPORATIVO MICROSOFT TEAMS (BOLSA B3 & MACROECONOMIA)
 # ==============================================================================
-_teams_token_cache = {"token": None, "expires_at": 0}
+_teams_token_cache = {}
 TEAMS_TENANT_ID = os.environ.get("TEAMS_TENANT_ID", "d62891e4-d7fd-4035-be5e-56f56edcc459")
 
-def obter_token_teams():
+def obter_token_teams(tenant="botframework.com"):
     now = time.time()
-    if _teams_token_cache["token"] and now < _teams_token_cache["expires_at"]:
-        return _teams_token_cache["token"]
+    if _teams_token_cache.get(tenant) and now < _teams_token_cache[tenant].get("expires_at", 0):
+        return _teams_token_cache[tenant]["token"]
     
-    url = f"https://login.microsoftonline.com/{TEAMS_TENANT_ID}/oauth2/v2.0/token"
-    data = {
-        "grant_type": "client_credentials",
-        "client_id": TEAMS_BOT_ID,
-        "client_secret": TEAMS_CLIENT_SECRET,
-        "scope": "https://api.botframework.com/.default"
-    }
-    try:
-        r = requests.post(url, data=data, timeout=10)
-        if r.status_code == 200:
-            res = r.json()
-            token = res.get("access_token")
-            expires_in = res.get("expires_in", 3600)
-            _teams_token_cache["token"] = token
-            _teams_token_cache["expires_at"] = now + expires_in - 300
-            return token
-        else:
-            logger.error(f"Erro ao obter token do Teams: {r.status_code} - {r.text}")
-    except Exception as e:
-        logger.error(f"Exceção ao obter token do Teams: {e}")
+    # Ordem de tentativa de autorização: botframework.com (universal), common, e tenant corporativo
+    candidatos = [tenant, "botframework.com", "common", TEAMS_TENANT_ID]
+    for t_id in candidatos:
+        if not t_id:
+            continue
+        url = f"https://login.microsoftonline.com/{t_id}/oauth2/v2.0/token"
+        data = {
+            "grant_type": "client_credentials",
+            "client_id": TEAMS_BOT_ID,
+            "client_secret": TEAMS_CLIENT_SECRET,
+            "scope": "https://api.botframework.com/.default"
+        }
+        try:
+            r = requests.post(url, data=data, timeout=10)
+            if r.status_code == 200:
+                res = r.json()
+                token = res.get("access_token")
+                expires_in = res.get("expires_in", 3600)
+                _teams_token_cache[tenant] = {
+                    "token": token,
+                    "expires_at": now + expires_in - 300
+                }
+                return token
+            else:
+                logger.warning(f"Tentativa de token Teams ({t_id}) retornou: {r.status_code}")
+        except Exception as e:
+            logger.error(f"Erro ao obter token do Teams ({t_id}): {e}")
     return None
 
 
@@ -1460,7 +1467,11 @@ def formatar_texto_para_teams(texto):
 
 
 def enviar_mensagem_teams(service_url, conversation_id, text, reply_to_id=None):
-    token = obter_token_teams()
+    if not service_url or not conversation_id:
+        logger.error(f"service_url ({service_url}) ou conversation_id ({conversation_id}) vazios.")
+        return False
+
+    token = obter_token_teams("botframework.com") or obter_token_teams(TEAMS_TENANT_ID)
     if not token:
         logger.error("Sem token válido do Bot Framework para envio ao Teams.")
         return False
@@ -1484,6 +1495,17 @@ def enviar_mensagem_teams(service_url, conversation_id, text, reply_to_id=None):
         if r.status_code in [200, 201, 202]:
             logger.info(f"Mensagem entregue com sucesso no Teams ({conversation_id})")
             return True
+        elif r.status_code == 401:
+            logger.warning("Erro 401 no envio Teams. Tentando renovar com tenant corporativo...")
+            token_corp = obter_token_teams(TEAMS_TENANT_ID)
+            if token_corp:
+                headers["Authorization"] = f"Bearer {token_corp}"
+                r2 = requests.post(url, headers=headers, json=body, timeout=15)
+                if r2.status_code in [200, 201, 202]:
+                    logger.info(f"Mensagem entregue no Teams com token corporativo ({conversation_id})")
+                    return True
+            logger.error(f"Erro persistente 401 ao enviar mensagem ao Teams: {r.text}")
+            return False
         else:
             logger.error(f"Erro ao enviar mensagem ao Teams: {r.status_code} - {r.text}")
             return False
@@ -2267,20 +2289,19 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
         return _tratar_pilar_2_ticker(ticker_achado, data_alvo=data_alvo)
 
     # 4. Pilares Numéricos Diretos (1 a 8) e Palavras-Gatilho Rápidas
-    # Pilar 1: Índices
+    # Pilar 1: Índices (Ibov e Americanos)
     gatilhos_pilar_1 = [
-        "IBOV", "IBOVESPA", "BOVESPA", 
+        "IBOV", "IBOVESPA", "BOVESPA", "^BVSP",
         "DOW JONES", "DOW", "DJI", 
         "NASDAQ", "NYSE", 
         "PETRÓLEO BRENT", "PETROLEO BRENT", "BRENT", 
-        "OMXS30", "OMX", 
-        "ÍNDICE", "INDICE", "ÍNDICES", "INDICES"
+        "OMXS30", "OMX"
     ]
-    if t_clean == "1" or (len(t_clean) <= 15 and any(re.search(r'\b' + re.escape(k) + r'\b', t_upper) or k in t_upper for k in gatilhos_pilar_1)):
+    if t_clean == "1" or any(re.search(r'\b' + re.escape(k) + r'\b', t_upper) or k in t_upper for k in gatilhos_pilar_1):
         return _tratar_pilar_1_indices(t_clean)
 
     # Pilar 3: Dólar PTAX
-    if t_clean == "3" or (len(t_clean) <= 20 and any(k in t_upper for k in ["DOLAR", "DÓLAR", "USD", "CAMBIO", "CÂMBIO", "PTAX"])):
+    if t_clean == "3" or any(re.search(r'\b' + re.escape(k) + r'\b', t_upper) or k in t_upper for k in ["DOLAR", "DÓLAR", "USD", "CAMBIO", "CÂMBIO", "PTAX"]):
         return _tratar_pilar_3_dolar()
 
     # Pilar 4: Volume e Preço
@@ -2295,16 +2316,16 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
         )
 
     # Pilar 5: Indicadores Macro
-    if t_clean == "5" or (len(t_clean) <= 25 and any(k in t_upper for k in ["MACRO", "INDICADOR", "INDICADORES", "SELIC", "IPCA", "INFLAÇÃO", "INFLACAO", "IGPM", "IGP-M", "PIB", "IBC-BR", "CAGED", "CURVA DE DI"])):
+    if t_clean == "5" or any(re.search(r'\b' + re.escape(k) + r'\b', t_upper) or k in t_upper for k in ["MACRO", "INDICADOR", "INDICADORES", "SELIC", "IPCA", "INFLAÇÃO", "INFLACAO", "IGPM", "IGP-M", "PIB", "IBC-BR", "CAGED", "CURVA DE DI"]):
         return _tratar_pilar_5_macro(t_clean)
 
     # Pilar 6: 5 Altas e 5 Baixas
     gatilhos_pilar_6 = [
         "MAIORES ALTAS", "TOP ALTAS", "MAIORES BAIXAS", "TOP BAIXAS",
-        "5 MAIORES", "5 MENORES", "MAIORES", "MENORES",
-        "DESTAQUES DO DIA", "DESTAQUES", "RANKING"
+        "5 MAIORES", "5 MENORES", "ALTAS E BAIXAS", "MAIORES QUEDAS",
+        "DESTAQUES DO DIA", "DESTAQUES DO PREGÃO", "RANKING"
     ]
-    if t_clean == "6" or t_clean.startswith("6 ") or t_clean.startswith("6-") or (len(t_clean) <= 30 and any(k in t_upper for k in gatilhos_pilar_6)):
+    if t_clean == "6" or t_clean.startswith("6 ") or t_clean.startswith("6-") or any(k in t_upper for k in gatilhos_pilar_6):
         match_data = re.search(r'(\d{2}[/-]\d{2}[/-]\d{4}|\d{4}[/-]\d{2}[/-]\d{2}|HOJE|ONTEM)', t_upper)
         if match_data and t_clean != "6":
             return _tratar_pilar_6_altas_baixas(match_data.group(1), user_name)
@@ -2316,16 +2337,16 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
 
     # Pilar 7: Setores Oficiais (Opção B - Resumo Executivo)
     setores_palavras = [
-        "SETOR", "SETORES", "SEGMENTO", "SEGMENTOS", "INDÚSTRIA", "INDUSTRIA",
+        "SETOR", "SETORES", "SEGMENTO", "SEGMENTOS",
         "CONSUMO CÍCLICO", "UTILIDADE PÚBLICA", "FINANCEIRO", "MATERIAIS BÁSICOS",
         "CONSUMO NÃO CÍCLICO", "PETRÓLEO", "PETROLEO", "BENS INDUSTRIAIS", "SAÚDE", "SAUDE",
         "TELECOM", "TECNOLOGIA DA INFORMAÇÃO"
     ]
-    if t_clean == "7" or (len(t_clean) <= 25 and any(k in t_upper for k in setores_palavras)):
+    if t_clean == "7" or any(re.search(r'\b' + re.escape(k) + r'\b', t_upper) or k in t_upper for k in setores_palavras):
         return _tratar_pilar_7_setores(t_clean)
 
     # Pilar 8: Fluxos de Ativos / Investidores
-    if t_clean == "8" or (len(t_clean) <= 25 and any(k in t_upper for k in ["FLUXO", "FLUXOS", "INVESTIDOR", "INVESTIDORES", "ESTRANGEIRO", "GRINGO", "INSTITUCIONAL", "INSTITUCIONAIS", "PESSOA FÍSICA", "PESSOA FISICA"])):
+    if t_clean == "8" or any(re.search(r'\b' + re.escape(k) + r'\b', t_upper) or k in t_upper for k in ["FLUXO", "FLUXOS", "INVESTIDOR", "INVESTIDORES", "ESTRANGEIRO", "GRINGO", "INSTITUCIONAL", "INSTITUCIONAIS", "PESSOA FÍSICA", "PESSOA FISICA"]):
         return _tratar_pilar_8_fluxos(t_clean)
 
     # Pilar 2 atalho textual
