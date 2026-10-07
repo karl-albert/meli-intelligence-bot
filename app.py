@@ -20,7 +20,7 @@ import re
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, send_file
 import google.generativeai as genai
 
 # Fuso horário oficial de Brasília (BRT UTC-3)
@@ -2735,6 +2735,24 @@ def sync_data():
             logger.error(f"Erro na sincronização: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
 
+
+@app.route("/download_b3_duckdb", methods=["GET"])
+def download_b3_duckdb():
+    valid_secrets = {SYNC_SECRET, "joca_sync_2026_karl", "meli_joca_sync_2026_karl"}
+    req_secret = request.args.get("secret") or request.headers.get("X-Sync-Secret")
+    if req_secret not in valid_secrets:
+        return jsonify({"status": "error", "message": "Chave de acesso inválida."}), 403
+    
+    if not os.path.exists(B3_DB_PATH):
+        return jsonify({"status": "error", "message": "Arquivo b3_database.duckdb não encontrado no servidor."}), 404
+
+    logger.info("📥 [DOWNLOAD B3] Enviando b3_database.duckdb para cliente...")
+    return send_file(
+        B3_DB_PATH,
+        as_attachment=True,
+        download_name="b3_database.duckdb",
+        mimetype="application/octet-stream"
+    )
 
 
 # ==============================================================================
