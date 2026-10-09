@@ -40,11 +40,13 @@ app = Flask(__name__)
 # ==============================================================================
 _B64_TOK_BQ = "ODkxNjczMzY3MTpBQUgxaHR2ZDZWcURLc25nZHlZc0ZPYVhkdk5nVVEwUmp5TQ=="
 _B64_TOK_FABRIC = "ODk1ODUyNTM2MzpBQUgwUkQwbDhlWHZyZTFZeTJYVE90VkxuT0FCOGx1UWRoRQ=="
+_B64_TOK_B3 = "ODk2NzcwMDk0NjpBQUdya3I2MHlkODhTWmlQb0JwNHE2SmJ6VzBhSXNaWlFfYw=="
 _B64_GEM = "QVEuQWI4Uk42S3RWbzR3RkhZTVA4a3FiMXplWXo2dmRTLVRrakd3ZG1yY18xbzY4MURuUUE="
 
 FALLBACK_KEY = base64.b64decode(_B64_GEM).decode("utf-8").strip()
 FALLBACK_TOKEN_BQ = base64.b64decode(_B64_TOK_BQ).decode("utf-8").strip()
 FALLBACK_TOKEN_FABRIC = base64.b64decode(_B64_TOK_FABRIC).decode("utf-8").strip()
+FALLBACK_TOKEN_B3 = base64.b64decode(_B64_TOK_B3).decode("utf-8").strip()
 
 env_key = os.environ.get("GEMINI_KEY", "").strip()
 GEMINI_KEY = env_key if (env_key and len(env_key) > 20) else FALLBACK_KEY
@@ -55,6 +57,9 @@ TOKEN_MELI = TOKEN_BQ
 
 env_token_fabric = os.environ.get("TELEGRAM_TOKEN_FABRIC", "").strip()
 TOKEN_FABRIC = env_token_fabric if (env_token_fabric and len(env_token_fabric) > 20) else FALLBACK_TOKEN_FABRIC
+
+env_token_b3 = os.environ.get("TELEGRAM_TOKEN_B3", "").strip()
+TOKEN_B3 = env_token_b3 if (env_token_b3 and len(env_token_b3) > 20) else FALLBACK_TOKEN_B3
 
 # Credenciais Microsoft Teams (Joca_B3)
 _B64_TEAMS_ID = "YmRmYzI1MjYtNjczYS00YWU5LWExMjEtM2U2YTc4MmE1NTlk"
@@ -86,6 +91,7 @@ BASE_TELEGRAM_URL = f"https://api.telegram.org/bot{TOKEN_BQ}"
 BASE_URL_BQ = f"https://api.telegram.org/bot{TOKEN_BQ}"
 BASE_URL_MELI = BASE_URL_BQ
 BASE_URL_FABRIC = f"https://api.telegram.org/bot{TOKEN_FABRIC}"
+BASE_URL_B3 = f"https://api.telegram.org/bot{TOKEN_B3}"
 
 # Configurar Google Gemini
 genai.configure(api_key=GEMINI_KEY)
@@ -557,6 +563,120 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
                 logger.error(f"Erro ao gerar/enviar voz de resposta: {e_voz}")
     except Exception as e_proc:
         logger.error(f"Erro crítico no processamento assíncrono: {e_proc}")
+
+
+def _processar_mensagem_telegram_b3(msg, base_url, bot_label="Bot_B3"):
+    """Executado em segundo plano para o Bot_B3 no Telegram"""
+    try:
+        chat_id = msg.get("chat", {}).get("id")
+        user_obj = msg.get("from", {})
+        user_id = user_obj.get("id") or chat_id
+        user_name = user_obj.get("first_name", "Investidor")
+        if not chat_id:
+            return
+
+        # Rate limiter anti-spam
+        permitido, motivo, espera_s = rate_limiter.check_user_limit(user_id)
+        if not permitido:
+            logger.warning(f"Rate limit acionado para {user_name} (ID {user_id}). Motivo: {motivo}")
+            aviso_spam = (
+                f"⏳ *Calma lá, {user_name}!* 🚦\n\n"
+                f"Você está enviando perguntas muito rápido. "
+                f"Por favor aguarde cerca de *{espera_s} segundos* antes da próxima dúvida."
+            )
+            enviar_mensagem(chat_id, aviso_spam, base_url=base_url)
+            return
+
+        texto, origem_audio = None, False
+
+        # Tratamento de voz recebida
+        if "voice" in msg or "audio" in msg:
+            media_obj = msg.get("voice") or msg.get("audio")
+            file_id = media_obj.get("file_id")
+            mime_type = media_obj.get("mime_type", "audio/ogg")
+            try:
+                requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "record_voice"}, timeout=5)
+                get_f = requests.get(f"{base_url}/getFile?file_id={file_id}", timeout=10).json()
+                if get_f.get("ok"):
+                    f_path = get_f["result"]["file_path"]
+                    token_part = base_url.split("/bot")[-1]
+                    dl_url = f"https://api.telegram.org/file/bot{token_part}/{f_path}"
+                    audio_bytes = requests.get(dl_url, timeout=20).content
+                    texto = transcrever_audio(audio_bytes, mime_type)
+                    origem_audio = True
+            except Exception as e_audio:
+                logger.error(f"Erro ao processar áudio recebido no Bot_B3: {e_audio}")
+                enviar_mensagem(chat_id, "🎙️ Não consegui ouvir seu áudio com clareza. Poderia repetir ou digitar?", base_url=base_url)
+                return
+
+        elif "text" in msg:
+            texto = msg["text"]
+
+        if not texto:
+            return
+
+        t_inicio = time.time()
+        requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "typing"}, timeout=5)
+
+        # Trata comandos de boas-vindas /start
+        if texto.strip() == "/start":
+            msg_start = (
+                f"🏛️ *Olá, {user_name}! Bem-vindo ao {bot_label}!*\n\n"
+                f"Sou o seu assistente de inteligência de mercado financeiro da **B3 (Bolsa de Valores)**.\n\n"
+                f"💡 *O que você pode me perguntar:*\n"
+                f"• Digite `1` ou `IBOV` para ver o resumo do Ibovespa hoje\n"
+                f"• Digite um código de ação: `PETR4`, `VALE3`, `ITUB4`, `WEGE3`\n"
+                f"• `Maiores altas`, `Maiores baixas`, `Volume financeiro`\n"
+                f"• Indicadores macro: `Selic`, `IPCA`, `Dólar`, `PIB`\n"
+                f"• Ou envie uma pergunta por áudio!\n\n"
+                f"📊 *Como posso te ajudar agora?*"
+            )
+            enviar_mensagem(chat_id, msg_start, base_url=base_url)
+            return
+
+        # Processa pergunta da B3
+        conversation_id = f"tg_{chat_id}"
+        resposta = processar_pergunta_b3(texto, user_name, conversation_id)
+        if not resposta:
+            resposta = "Desculpe, não consegui obter informações da Bolsa para essa consulta."
+
+        # Substitui formatações HTML como <br/> por quebras de linha para o Telegram
+        resposta = re.sub(r'<br\s*/?>', '\n', resposta, flags=re.IGNORECASE)
+
+        enviar_mensagem(chat_id, resposta, base_url=base_url)
+
+        # Telemetria
+        try:
+            t_duracao = round(time.time() - t_inicio, 2)
+            from_user = msg.get("from", {})
+            p_nome = from_user.get("first_name", "")
+            u_nome = from_user.get("last_name", "")
+            nome_completo = f"{p_nome} {u_nome}".strip() or user_name
+            username_val = from_user.get("username", "")
+            username_str = f"@{username_val}" if username_val else "-"
+            agora = datetime.now()
+            
+            salvar_conversa({
+                "id": msg.get("message_id") or int(time.time()),
+                "data_hora": agora.strftime("%Y-%m-%d %H:%M:%S"),
+                "data": agora.strftime("%Y-%m-%d"),
+                "hora": agora.strftime("%H:%M:%S"),
+                "bot": "Bot_B3_Telegram",
+                "chat_id": str(chat_id),
+                "usuario": nome_completo,
+                "username": username_str,
+                "tipo_entrada": "Voz (Telegram)" if origem_audio else "Texto (Telegram)",
+                "pergunta": texto,
+                "resposta": resposta[:500] if resposta else "",
+                "tempo_resposta_s": t_duracao,
+                "status": "Respondido (Sucesso)"
+            })
+        except Exception as e_log_b3:
+            logger.error(f"Erro ao salvar telemetria Telegram Bot_B3: {e_log_b3}")
+
+    except Exception as e_proc_b3:
+        logger.error(f"Erro ao processar mensagem do Bot_B3 Telegram: {e_proc_b3}")
+
 
 
 # ==============================================================================
@@ -1309,7 +1429,8 @@ def status():
         "bots": {
             "bigquery": "Joca_BigQuery",
             "fabric": "Joca_Fabric",
-            "b3_teams": "Joca_B3"
+            "b3_teams": "Joca_B3",
+            "b3_telegram": "Bot_B3"
         }
     })
 
@@ -1402,17 +1523,56 @@ def set_webhook_fabric():
     return jsonify({"bot": "Joca_Fabric", "telegram_response": res, "webhook_url": webhook_url})
 
 
+@app.route("/webhook_b3", methods=["GET", "POST"])
+def webhook_b3():
+    if request.method == "GET":
+        return f"""
+        <html>
+        <head><title>Webhook Bot_B3</title></head>
+        <body style="font-family: sans-serif; text-align: center; padding: 50px; background: #0b0f19; color: #fff;">
+            <h1>📈 Webhook do Bot_B3 está ATIVO! 🟢</h1>
+            <p style="color: #94a3b8; font-size: 16px; margin: 20px 0;">Endpoint oficial do robô <strong>Bot_B3 (@BolsaB3_bot)</strong> pronto para receber atualizações do Telegram.</p>
+            <p><a href="/" style="color: #38bdf8; text-decoration: none; font-weight: bold;">← Voltar para o Painel</a></p>
+        </body>
+        </html>
+        """
+
+    payload = request.get_json(silent=True)
+    if not payload or "message" not in payload:
+        return jsonify({"status": "no payload/message"}), 200
+
+    msg = payload["message"]
+    threading.Thread(
+        target=_processar_mensagem_telegram_b3, 
+        args=(msg, BASE_URL_B3, "Bot_B3"), 
+        daemon=True
+    ).start()
+
+    return jsonify({"status": "received"}), 200
+
+
+@app.route("/set_webhook_b3", methods=["GET"])
+def set_webhook_b3():
+    host_url = request.host_url.replace("http://", "https://").rstrip("/")
+    webhook_url = f"{host_url}/webhook_b3"
+    res = requests.post(f"{BASE_URL_B3}/setWebhook", json={"url": webhook_url}).json()
+    return jsonify({"bot": "Bot_B3", "telegram_response": res, "webhook_url": webhook_url})
+
+
 @app.route("/set_all_webhooks", methods=["GET"])
 def set_all_webhooks():
     host_url = request.host_url.replace("http://", "https://").rstrip("/")
     wh_bq = f"{host_url}/webhook"
     wh_fabric = f"{host_url}/webhook_fabric"
+    wh_b3 = f"{host_url}/webhook_b3"
     res_bq = requests.post(f"{BASE_URL_BQ}/setWebhook", json={"url": wh_bq}).json()
     res_fabric = requests.post(f"{BASE_URL_FABRIC}/setWebhook", json={"url": wh_fabric}).json()
+    res_b3 = requests.post(f"{BASE_URL_B3}/setWebhook", json={"url": wh_b3}).json()
     return jsonify({
         "status": "success",
         "joca_bigquery": {"bot": "Joca_BigQuery", "url": wh_bq, "response": res_bq},
-        "joca_fabric": {"bot": "Joca_Fabric", "url": wh_fabric, "response": res_fabric}
+        "joca_fabric": {"bot": "Joca_Fabric", "url": wh_fabric, "response": res_fabric},
+        "bot_b3": {"bot": "Bot_B3", "url": wh_b3, "response": res_b3}
     })
 
 
