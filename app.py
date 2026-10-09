@@ -2602,6 +2602,17 @@ def _processar_mensagem_whatsapp(payload):
         logger.error(f"Erro no processamento de webhook WhatsApp: {e_proc_wa}")
 
 
+ULTIMOS_LOGS_WHATSAPP = []
+
+@app.route("/api/debug_whatsapp", methods=["GET"])
+def debug_whatsapp():
+    return jsonify({
+        "total_webhooks": len(ULTIMOS_LOGS_WHATSAPP),
+        "token_configurado": bool(WHATSAPP_TOKEN),
+        "phone_id": WHATSAPP_PHONE_NUMBER_ID,
+        "logs": ULTIMOS_LOGS_WHATSAPP[-10:]
+    })
+
 @app.route("/api/whatsapp_b3", methods=["GET", "POST"])
 def webhook_whatsapp_b3():
     # Validação do Webhook pela Meta (GET)
@@ -2619,6 +2630,11 @@ def webhook_whatsapp_b3():
 
     # Recebimento de mensagens (POST)
     payload = request.get_json(silent=True) or {}
+    agora_str = datetime.now(BRT_TZ).strftime("%Y-%m-%d %H:%M:%S")
+    ULTIMOS_LOGS_WHATSAPP.append({"timestamp": agora_str, "payload": payload})
+    if len(ULTIMOS_LOGS_WHATSAPP) > 50:
+        ULTIMOS_LOGS_WHATSAPP.pop(0)
+
     if payload.get("object") == "whatsapp_business_account":
         threading.Thread(target=_processar_mensagem_whatsapp, args=(payload,), daemon=True).start()
         return jsonify({"status": "EVENT_RECEIVED"}), 200
