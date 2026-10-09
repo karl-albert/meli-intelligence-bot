@@ -1800,19 +1800,27 @@ def _tratar_pilar_2_ticker(ticker, data_alvo=None):
     con = get_b3_db()
     try:
         t_up = ticker.upper().strip()
-        ativo = con.execute("SELECT ticker, nome_empresa, setor_atuacao, ticker_inativo FROM dim_ativos WHERE ticker = ?", [t_up]).fetchone()
-        if not ativo:
-            ativo = con.execute("SELECT ticker, nome_empresa, setor_atuacao, ticker_inativo FROM dim_ativos_board WHERE ticker = ?", [t_up]).fetchone()
+        ativo = None
+        try:
+            ativo = con.execute("SELECT ticker, nome_empresa, setor_atuacao, ticker_inativo FROM dim_ativos_board WHERE UPPER(ticker) = ?", [t_up]).fetchone()
+        except Exception:
+            pass
 
         if not ativo:
-            return f"⚠️ O ticker **{t_up}** não foi encontrado na base de ativos oficiais do Painel B3."
+            try:
+                ativo = con.execute("SELECT ticker, nome_empresa, setor_atuacao, ticker_inativo FROM dim_ativos WHERE UPPER(ticker) = ?", [t_up]).fetchone()
+            except Exception:
+                pass
 
-        nome = ativo[1]
-        setor = ativo[2]
-        status = ativo[3]
-
-        if status == "INATIVA":
-            return f"⚠️ **Ativo Inativo:** O ticker **{t_up}** consta como **INATIVO** na base do Painel B3 (não é exibido nas telas ativas do relatório)."
+        if ativo:
+            nome = ativo[1] or t_up
+            setor = ativo[2] or "Ações B3"
+            status = ativo[3] or "ATIVA"
+            if status == "INATIVA":
+                return f"⚠️ **Ativo Inativo:** O ticker **{t_up}** consta como **INATIVO** na base do Painel B3 (não é exibido nas telas ativas do relatório)."
+        else:
+            nome = t_up
+            setor = "Ações B3"
 
         if data_alvo:
             dt_str_iso = data_alvo.strftime("%Y-%m-%d") if hasattr(data_alvo, "strftime") else str(data_alvo)
@@ -2448,6 +2456,15 @@ def processar_pergunta_b3(texto, user_name="Karl", conversation_id="default"):
 
     ticker_achado = None
     tickers_encontrados = re.findall(r'\b[A-Z]{4}(?:3|4|5|6|11)\b', t_upper)
+
+    # Se o usuário digitou múltiplos tickers (ex: PETR4 VALE3 ou ENEV3 BBDC4)
+    if len(tickers_encontrados) > 1 and not any(k in t_upper for k in ["VOLUME FINANCEIRO", "MAIOR VOLUME", "VOLUME NEGOCIADO"]):
+        respostas_multi = []
+        tickers_unicos = list(dict.fromkeys(tickers_encontrados))[:5]
+        for tk in tickers_unicos:
+            respostas_multi.append(_tratar_pilar_2_ticker(tk, data_alvo=data_alvo))
+        return "\n\n━━━━━━━━━━━━━━━━━━━━\n\n".join(respostas_multi)
+
     if tickers_encontrados:
         ticker_achado = tickers_encontrados[0]
     else:
