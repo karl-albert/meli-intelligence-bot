@@ -2858,6 +2858,37 @@ except Exception as e_juca:
 
 
 # ==============================================================================
+# POLÍTICA DE PRIVACIDADE E TERMOS (EXIGÊNCIA META / WHATSAPP)
+# ==============================================================================
+@app.route("/politica-de-privacidade", methods=["GET"])
+def politica_de_privacidade():
+    return """<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>Política de Privacidade - Joca B3</title></head>
+<body style="font-family:sans-serif;max-width:800px;margin:40px auto;line-height:1.6;padding:0 20px;">
+    <h1>Política de Privacidade — Joca B3 Bot</h1>
+    <p>O aplicativo <strong>Bot_B3 / Joca B3</strong> é um assistente corporativo que fornece dados analíticos do mercado financeiro brasileiro (B3) e indicadores econômicos oficiais.</p>
+    <h2>1. Coleta de Informações</h2>
+    <p>Coletamos apenas o identificador da conversa (número de telefone) e as perguntas enviadas para fins exclusivos de processamento e resposta analítica da consulta.</p>
+    <h2>2. Uso dos Dados</h2>
+    <p>Os dados não são comercializados nem compartilhados com terceiros para fins publicitários.</p>
+    <h2>3. Segurança</h2>
+    <p>Todas as comunicações utilizam criptografia padrão de mercado (HTTPS e Meta WhatsApp Cloud API).</p>
+</body></html>""", 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+@app.route("/termos-de-servico", methods=["GET"])
+def termos_de_servico():
+    return """<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="UTF-8"><title>Termos de Serviço - Joca B3</title></head>
+<body style="font-family:sans-serif;max-width:800px;margin:40px auto;line-height:1.6;padding:0 20px;">
+    <h1>Termos de Serviço — Joca B3 Bot</h1>
+    <p>O Joca B3 fornece informações públicas sobre cotações, índices e indicadores macroeconômicos com fins exclusivamente educativos e operacionais internos.</p>
+</body></html>""", 200, {"Content-Type": "text/html; charset=utf-8"}
+
+
+# ==============================================================================
 # 8. EXECUÇÃO DO APLICATIVO
 # ==============================================================================
 if __name__ == '__main__':
