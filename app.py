@@ -69,8 +69,15 @@ env_teams_secret = os.environ.get("TEAMS_CLIENT_SECRET", "").strip()
 TEAMS_CLIENT_SECRET = env_teams_secret if (env_teams_secret and len(env_teams_secret) > 10) else FALLBACK_TEAMS_SEC
 
 # Credenciais WhatsApp Meta Cloud API Oficial (Joca_B3)
-WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "").strip()
-WHATSAPP_PHONE_NUMBER_ID = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+_FALLBACK_WA_TOKEN = "EAAlOJtrlBgoBSnqVMHD4jmCCqyIJnjdRCWKoDzkQB0bIrPNSZBvns8c0lrVKgOeS0euBsaLumJiQawxRNW6VTl2YFHLLGkxxWIZBg53tzimV7H7V6hPLeLX65fM1E8QBVGY6vCY66SpotQhId5EeMbD35EX7ZCR7BYZAEcjiIaNnu5LAM4LHiVipoa3ZAOxZAg6UEkWONU2sZAVQDRKXxadwpeJWfVDpleZAAJoFMZCoODxeEQHp7d6jhZBaNRxK4WkJMFADWE9p5dZAJefuBvicEGj6gQ2N2pDXpRf"
+_FALLBACK_WA_PHONE_ID = "1279171131956840"
+
+env_wa_token = os.environ.get("WHATSAPP_TOKEN", "").strip()
+WHATSAPP_TOKEN = env_wa_token if (env_wa_token and len(env_wa_token) > 20) else _FALLBACK_WA_TOKEN
+
+env_wa_phone = os.environ.get("WHATSAPP_PHONE_NUMBER_ID", "").strip()
+WHATSAPP_PHONE_NUMBER_ID = env_wa_phone if (env_wa_phone and len(env_wa_phone) > 5) else _FALLBACK_WA_PHONE_ID
+
 WHATSAPP_VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "joca_b3_meta_2026").strip()
 
 # Configuração e Retrocompatibilidade
