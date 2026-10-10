@@ -1173,6 +1173,19 @@ def processar_pergunta(texto_msg, user_name):
             achou_sub = (k_sub, cat_pai, sub_nome)
             break
 
+    # Se não achou na lista fixa, busca dinâmica tolerante a singular/plural e pequenos erros (ex: 'carregadore')
+    if not achou_sub:
+        palavras_cand = re.findall(r'\b[a-z0-9áéíóúãõç]{4,}\b', t_lower)
+        stop_words = {'qual', 'como', 'para', 'onde', 'quando', 'faturamento', 'vendas', 'pedidos', 'valor', 'quanto', 'ytda', 'hoje', 'ontem', 'este', 'esse', 'aquele', 'pelo', 'pela', 'sobre'}
+        for p in palavras_cand:
+            if p in stop_words or p in [m.lower() for m in LISTA_MARCAS_TOP]:
+                continue
+            termo_busca = p[:6] if len(p) >= 6 else p
+            row_sub_dyn = con.execute(f"SELECT DISTINCT categoria, subcategoria FROM fato_ml WHERE subcategoria ILIKE '%{termo_busca}%' LIMIT 1").fetchone()
+            if row_sub_dyn:
+                achou_sub = (p, row_sub_dyn[0], row_sub_dyn[1])
+                break
+
     # Identificação de Categoria
     achou_cat = None
     for k_cat, cat_nome in MAPA_CATEGORIAS.items():
@@ -1279,8 +1292,8 @@ def processar_pergunta(texto_msg, user_name):
     elif any(w in t_lower for w in ['produto', 'anuncio', 'anúncio', 'item', 'mais vendido', 'mais vendid']):
         clean_sql = f"SELECT '{desc_tempo}' AS periodo, titulo_produto, marca, categoria, subcategoria, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento FROM fato_ml WHERE {where_tempo} GROUP BY titulo_produto, marca, categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
 
-    # CASO F: TOTAL GERAL DO PERÍODO
-    elif any(w in t_lower for w in ['total', 'geral', 'faturamento', 'faturou', 'vendas', 'vendeu', 'resultado']):
+    # CASO F: TOTAL GERAL DO PERÍODO (BLINDADO: NUNCA roda se houver 'de X', 'da X', etc.)
+    elif any(w in t_lower for w in ['total geral', 'faturamento total', 'vendas totais', 'resultado total']) or (any(w in t_lower for w in ['total', 'geral', 'faturamento', 'vendas']) and not re.search(r'\b(?:de|da|do|dos|das)\s+[a-z0-9áéíóúãõç]{3,}', t_lower)):
         if not disse_subcategoria and not disse_categoria and not achou_sub and not achou_cat and not achou_marca:
             clean_sql = f"SELECT '{desc_tempo}' AS periodo, SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_pedidos FROM fato_ml WHERE {where_tempo}"
 
