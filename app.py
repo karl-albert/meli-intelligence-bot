@@ -775,42 +775,310 @@ def responder_dicionario_ou_conceito(texto, user_name):
 def processar_pergunta(texto_msg, user_name):
     t_lower = texto_msg.lower().strip()
     
-    # 1. Comandos de Saudação e Ajudas Rápidas
-    if t_lower in ['/start', '/ajuda', 'oi', 'ola', 'olá', 'start']:
-        return (
-            f"👋 *Olá {user_name}! Eu sou o Joca_BigQuery (Render 24/7).*\n\n"
-            f"Estou com a IA do **Google Gemini** integrada à base analítica de vendas do BigQuery.\n"
-            f"📅 *Base atualizada até:* `{data_recente}` ({total_registros:,} registros sincronizados).\n\n"
-            f"🎙️ *Modo Voz Ativo:* Você pode mandar **mensagem de voz / áudio** no Telegram que eu compreendo e te respondo falando!\n\n"
-            f"💡 *Exemplos de perguntas:*\n"
-            f"• _\"Qual a quantidade de vendas total até agora no MTD?\"_\n"
-            f"• _\"Quantos produtos no total da Apple venderam hoje?\"_\n"
-            f"• _\"Qual o faturamento total de hoje?\"_\n"
-        )
+    dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
+    ano_recente = dt_obj.year
+    mes_recente = dt_obj.month
+    dia_recente = dt_obj.day
+    ontem_str = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
     
-    if 'slide' in t_lower and ('exemplo' in t_lower or 'caso' in t_lower):
+    try:
+        data_recente_fmt = f"{dia_recente:02d}/{mes_recente:02d}/{ano_recente}"
+    except Exception:
+        data_recente_fmt = str(data_recente)
+
+    # --------------------------------------------------------------------------
+    # 1. COMANDOS DE SAUDAÇÃO E MENU INICIAL EXECUTIVO (PADRÃO JOCA B3)
+    # --------------------------------------------------------------------------
+    if t_lower in ['/start', '/ajuda', 'oi', 'ola', 'olá', 'start', 'menu', 'ajuda', 'help', 'comandos', 'opcoes', 'opções', 'bom dia', 'boa tarde', 'boa noite']:
         return (
-            f"🤖 *Joca_BigQuery* · _Caso de Uso do Slide 5_\n"
-            f"No caso de uso do Slide 5 (dia 18/09/2026):\n\n"
-            f"📦 *Volume Vendido Apple:* 40 unidades\n"
-            f"💰 *Faturamento Estimado:* R$ 535.680\n"
-            f"🏷️ *Preço Médio:* R$ 13.392,01  ·  *% FULL:* 151%\n"
-            f"🏆 *Top 1 Anúncio:* iPhone 18 PRO MAX 512GB (10 unidades)\n\n"
-            f"📌 _Base analítica atualizada com dados em tempo real até {data_recente}!_"
+            f"👋 *Olá, {user_name}! Sou o Joca Meli.*\n"
+            f"Fui desenvolvido para tirar dúvidas comerciais e operacionais, integrado à base analítica de vendas do **Mercado Livre (Power BI)**.\n\n"
+            f"📅 *Base sincronizada até:* `{data_recente_fmt}` ({total_registros:,} registros indexados).\n"
+            f"🎙️ *Modo Voz Ativo:* Você também pode enviar **áudio/voz** no Telegram que eu compreendo e te respondo!\n\n"
+            f"Me guie sobre o que você precisa de informações:\n\n"
+            f"1️⃣ *Resumo do Dia & Comparativo* (Hoje vs Ontem)\n"
+            f"2️⃣ *Desempenho MTD & YTDA* (Acumulado no Mês e no Ano)\n"
+            f"3️⃣ *As 5 Categorias Macro* (Informática, Celulares, Eletro, Ferramentas, Casa)\n"
+            f"4️⃣ *Top Subcategorias* (Smartphones, Notebooks, Climatização, etc.)\n"
+            f"5️⃣ *Top Produtos Mais Vendidos* (Os anúncios líderes de receita)\n"
+            f"6️⃣ *Análise por Marca* (Apple, Samsung, Xiaomi, Dell, LG, Mondial, etc.)\n"
+            f"7️⃣ *Logística FULL & Frete Grátis* (Penetração e conversão)\n"
+            f"8️⃣ *Dicionário & Metadados da Base* (Estrutura e conceitos)\n\n"
+            f"💡 _Você pode digitar o número correspondente (1 a 8) ou perguntar diretamente!_\n"
+            f"Exemplos: _\"Samsung no YTDA do ano passado\"_, _\"smartwatches no YTDA 2025\"_, _\"faturamento de Apple hoje\"_."
         )
 
-    # 2. Respostas Conceituais do Dicionário de Dados Oficial
+    # --------------------------------------------------------------------------
+    # 2. RESOLUÇÃO TEMPORAL PRECISA E INTELIGENTE (ANOS, YTDA, MTD, ONTEM, HOJE)
+    # --------------------------------------------------------------------------
+    # A. Detecção de ano explícito (ex: 2025, 2024, 2026) ou "ano passado"
+    m_ano = re.search(r'\b(202[0-9])\b', t_lower)
+    disse_ano_passado = any(w in t_lower for w in ['ano passado', 'ano anterior', 'homologo', 'homólogo'])
+    
+    ano_alvo = None
+    if m_ano:
+        ano_alvo = int(m_ano.group(1))
+    elif disse_ano_passado:
+        ano_alvo = ano_recente - 1
+
+    # B. Intenção temporal
+    quer_ytda = any(k in t_lower for k in ['ytda', 'ytd', 'acumulado no ano', 'acumulado do ano', 'no ano', 'deste ano', 'do ano atual'])
+    quer_mtd = any(k in t_lower for k in ['mtd', 'acumulado no mês', 'acumulado no mes', 'acumulado do mês', 'no mês', 'no mes', 'deste mês', 'deste mes', 'mês atual', 'mes atual'])
+    quer_ontem = 'ontem' in t_lower
+
+    if quer_ytda:
+        if ano_alvo and ano_alvo != ano_recente:
+            # Período homólogo acumulado no ano anterior até o mesmo dia/mês
+            data_corte_alvo = f"{ano_alvo}-{mes_recente:02d}-{dia_recente:02d}"
+            where_tempo = f"ano = {ano_alvo} AND data <= '{data_corte_alvo}'"
+            desc_tempo = f"YTDA {ano_alvo} (Homólogo até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
+        else:
+            where_tempo = f"ano = {ano_recente} AND data <= '{data_recente}'"
+            desc_tempo = f"YTDA {ano_recente} (Acumulado no Ano até {data_recente_fmt})"
+    elif quer_mtd:
+        if ano_alvo and ano_alvo != ano_recente:
+            data_corte_alvo = f"{ano_alvo}-{mes_recente:02d}-{dia_recente:02d}"
+            where_tempo = f"ano = {ano_alvo} AND mes = {mes_recente} AND data <= '{data_corte_alvo}'"
+            desc_tempo = f"MTD {mes_recente:02d}/{ano_alvo} (Homólogo até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
+        else:
+            where_tempo = f"ano = {ano_recente} AND mes = {mes_recente} AND data <= '{data_recente}'"
+            desc_tempo = f"MTD (Acumulado no Mês {mes_recente:02d}/{ano_recente} até {data_recente_fmt})"
+    elif ano_alvo and ano_alvo != ano_recente:
+        # Usuário pediu um ano anterior fechado sem falar YTDA (ex: "em 2025" ou "no ano de 2025")
+        where_tempo = f"ano = {ano_alvo}"
+        desc_tempo = f"Ano Completo de {ano_alvo}"
+    elif quer_ontem:
+        where_tempo = f"data = '{ontem_str}'"
+        desc_tempo = f"Ontem ({ontem_str})"
+    else:
+        # Checa datas específicas formatadas (YYYY-MM-DD ou DD/MM/YYYY)
+        m_iso = re.search(r'\b(202[5-9])-(\d{2})-(\d{2})\b', t_lower)
+        m_br = re.search(r'\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](202[5-9]))?\b', t_lower)
+        if m_iso:
+            d_alvo = m_iso.group(0)
+            where_tempo = f"data = '{d_alvo}'"
+            desc_tempo = f"Data {d_alvo}"
+        elif m_br:
+            d, m, y = m_br.groups()
+            d_alvo = f"{y if y else ano_recente}-{int(m):02d}-{int(d):02d}"
+            where_tempo = f"data = '{d_alvo}'"
+            desc_tempo = f"Data {int(d):02d}/{int(m):02d}/{y if y else ano_recente}"
+        else:
+            # PADRÃO ABSOLUTO (DEFAULT): O Dia Mais Recente da Base (Hoje)
+            where_tempo = f"data = '{data_recente}'"
+            desc_tempo = f"Hoje ({data_recente_fmt})"
+
+    # --------------------------------------------------------------------------
+    # 3. GATILHOS NUMÉRICOS DIRETOS (URA RÁPIDA 1 A 8)
+    # --------------------------------------------------------------------------
+    # OPÇÃO 1: Resumo do Dia & Comparativo (Hoje vs Ontem)
+    if t_lower in ['1', 'resumo do dia', 'hoje vs ontem', 'comparativo diário', 'comparativo diario']:
+        try:
+            r_hoje = con.execute(f"SELECT SUM(fat_num), SUM(qtd_vendas_num) FROM fato_ml WHERE data = '{data_recente}'").fetchone()
+            r_ontem = con.execute(f"SELECT SUM(fat_num), SUM(qtd_vendas_num) FROM fato_ml WHERE data = '{ontem_str}'").fetchone()
+            fat_h, qtd_h = r_hoje[0] or 0.0, r_hoje[1] or 0
+            fat_o, qtd_o = r_ontem[0] or 0.0, r_ontem[1] or 0
+            tkt_h = (fat_h / qtd_h) if qtd_h > 0 else 0.0
+            tkt_o = (fat_o / qtd_o) if qtd_o > 0 else 0.0
+            
+            var_fat = ((fat_h - fat_o) / fat_o * 100) if fat_o > 0 else 0.0
+            var_qtd = ((qtd_h - qtd_o) / qtd_o * 100) if qtd_o > 0 else 0.0
+            sinal_fat = "🟢 +" if var_fat >= 0 else "🔴 "
+            sinal_qtd = "🟢 +" if var_qtd >= 0 else "🔴 "
+
+            fat_h_str = f"R$ {fat_h:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            tkt_h_str = f"R$ {tkt_h:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            fat_o_str = f"R$ {fat_o:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            tkt_o_str = f"R$ {tkt_o:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+            return (
+                f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n\n"
+                f"📅 *Resumo Diário do E-commerce ({data_recente_fmt})*\n\n"
+                f"💰 *Faturamento Hoje:* `{fat_h_str}` ({sinal_fat}{var_fat:.1f}% vs ontem)\n"
+                f"📦 *Volume de Vendas:* `{qtd_h:,}` pedidos ({sinal_qtd}{var_qtd:.1f}% vs ontem)\n"
+                f"🎯 *Ticket Médio:* `{tkt_h_str}`\n\n"
+                f"🔙 *Comparativo com Ontem ({ontem_str}):*\n"
+                f"• Faturamento Ontem: {fat_o_str}\n"
+                f"• Volume Ontem: {qtd_o:,} pedidos (Ticket: {tkt_o_str})\n\n"
+                f"📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_"
+            )
+        except Exception as e_opt1:
+            logger.error(f"Erro opcao 1: {e_opt1}")
+
+    # OPÇÃO 2: Desempenho MTD & YTDA
+    if t_lower in ['2', 'mtd e ytda', 'mtd & ytda', 'acumulado']:
+        try:
+            r_mtd = con.execute(f"SELECT SUM(fat_num), SUM(qtd_vendas_num) FROM fato_ml WHERE ano = {ano_recente} AND mes = {mes_recente} AND data <= '{data_recente}'").fetchone()
+            r_ytda = con.execute(f"SELECT SUM(fat_num), SUM(qtd_vendas_num) FROM fato_ml WHERE ano = {ano_recente} AND data <= '{data_recente}'").fetchone()
+            fat_m, qtd_m = r_mtd[0] or 0.0, r_mtd[1] or 0
+            fat_y, qtd_y = r_ytda[0] or 0.0, r_ytda[1] or 0
+            tkt_m = (fat_m / qtd_m) if qtd_m > 0 else 0.0
+            tkt_y = (fat_y / qtd_y) if qtd_y > 0 else 0.0
+
+            return (
+                f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n\n"
+                f"📈 *Desempenho Acumulado das Operações (Mercado Livre)*\n\n"
+                f"🗓️ *MTD (Mês {mes_recente:02d}/{ano_recente} até {data_recente_fmt}):*\n"
+                f"• Faturamento: *R$ {fat_m:,.2f}*\n"
+                f"• Volume de Vendas: *{qtd_m:,} pedidos*\n"
+                f"• Ticket Médio MTD: *R$ {tkt_m:,.2f}*\n\n"
+                f"🏆 *YTDA ({ano_recente} Acumulado até {data_recente_fmt}):*\n"
+                f"• Faturamento Acumulado: *R$ {fat_y:,.2f}*\n"
+                f"• Volume Total no Ano: *{qtd_y:,} pedidos*\n"
+                f"• Ticket Médio YTDA: *R$ {tkt_y:,.2f}*\n\n"
+                f"💡 _Dica: Para comparar com o ano passado, digite: 'YTDA 2025' ou 'Samsung no YTDA do ano passado'._\n\n"
+                f"📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_"
+            )
+        except Exception as e_opt2:
+            logger.error(f"Erro opcao 2: {e_opt2}")
+
+    # OPÇÃO 3: As 5 Categorias Macro
+    if t_lower in ['3', 'categorias macro', 'as 5 categorias', '5 categorias']:
+        try:
+            cur_cat = con.execute(f"""
+                SELECT categoria, SUM(fat_num) AS fat, SUM(qtd_vendas_num) AS qtd
+                FROM fato_ml WHERE {where_tempo}
+                GROUP BY categoria ORDER BY fat DESC
+            """).fetchall()
+            fat_tot = sum(r[1] for r in cur_cat) or 1.0
+
+            linhas = [
+                f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n",
+                f"📂 *Desempenho das 5 Categorias Macro — {desc_tempo}:*\n"
+            ]
+            for i, (cat, fat, qtd) in enumerate(cur_cat, 1):
+                pct = (fat / fat_tot) * 100
+                linhas.append(f"{i}️⃣ *{cat}*")
+                linhas.append(f"   💰 R$ {fat:,.2f} ({pct:.1f}%) · 📦 {qtd:,} pedidos\n")
+            
+            linhas.append(f"📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_")
+            return "\n".join(linhas)
+        except Exception as e_opt3:
+            logger.error(f"Erro opcao 3: {e_opt3}")
+
+    # OPÇÃO 4: Ranking de Subcategorias
+    if t_lower in ['4', 'top subcategorias', 'subcategorias']:
+        try:
+            cur_sub = con.execute(f"""
+                SELECT categoria, subcategoria, SUM(fat_num) AS fat, SUM(qtd_vendas_num) AS qtd
+                FROM fato_ml WHERE {where_tempo}
+                GROUP BY categoria, subcategoria ORDER BY fat DESC LIMIT 5
+            """).fetchall()
+
+            linhas = [
+                f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n",
+                f"🏷️ *Top 5 Subcategorias Líderes de Faturamento — {desc_tempo}:*\n"
+            ]
+            for i, (cat, sub, fat, qtd) in enumerate(cur_sub, 1):
+                linhas.append(f"{i}. *{sub}* _({cat})_")
+                linhas.append(f"   💰 R$ {fat:,.2f} · 📦 {qtd:,} pedidos\n")
+            
+            linhas.append(f"📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_")
+            return "\n".join(linhas)
+        except Exception as e_opt4:
+            logger.error(f"Erro opcao 4: {e_opt4}")
+
+    # OPÇÃO 5: Top Produtos Mais Vendidos
+    if t_lower in ['5', 'top produtos', 'produtos mais vendidos']:
+        try:
+            cur_prod = con.execute(f"""
+                SELECT titulo_produto, marca, subcategoria, SUM(fat_num) AS fat, SUM(qtd_vendas_num) AS qtd
+                FROM fato_ml WHERE {where_tempo}
+                GROUP BY titulo_produto, marca, subcategoria ORDER BY fat DESC LIMIT 5
+            """).fetchall()
+
+            linhas = [
+                f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n",
+                f"🏆 *Top 5 Anúncios Campeões de Venda — {desc_tempo}:*\n"
+            ]
+            for i, (prod, mrc, sub, fat, qtd) in enumerate(cur_prod, 1):
+                mrc_str = f" [{mrc}]" if mrc else ""
+                linhas.append(f"{i}. *{prod}*{mrc_str}")
+                linhas.append(f"   💰 R$ {fat:,.2f} · 📦 {qtd:,} un · 📂 _{sub}_\n")
+            
+            linhas.append(f"📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_")
+            return "\n".join(linhas)
+        except Exception as e_opt5:
+            logger.error(f"Erro opcao 5: {e_opt5}")
+
+    # OPÇÃO 6: Marcas e Fabricantes
+    if t_lower in ['6', 'marcas', 'marcas lideres', 'fabricantes']:
+        try:
+            cur_mrc = con.execute(f"""
+                SELECT marca, SUM(fat_num) AS fat, SUM(qtd_vendas_num) AS qtd
+                FROM fato_ml WHERE {where_tempo} AND marca IS NOT NULL AND TRIM(marca) != ''
+                GROUP BY marca ORDER BY fat DESC LIMIT 5
+            """).fetchall()
+
+            linhas = [
+                f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n",
+                f"🏭 *Top 5 Marcas Líderes de Faturamento — {desc_tempo}:*\n"
+            ]
+            for i, (mrc, fat, qtd) in enumerate(cur_mrc, 1):
+                linhas.append(f"{i}. *{mrc}* — R$ {fat:,.2f} ({qtd:,} pedidos)")
+            
+            linhas.append(f"\n💡 *Consulta Direta por Marca:*")
+            linhas.append(f"Para ver uma marca específica, basta digitar o nome dela a qualquer momento:")
+            linhas.append(f"Exemplos: _\"Apple\"_, _\"Samsung\"_, _\"Xiaomi no YTDA do ano passado\"_, _\"Mondial hoje\"_.\n")
+            linhas.append(f"📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_")
+            return "\n".join(linhas)
+        except Exception as e_opt6:
+            logger.error(f"Erro opcao 6: {e_opt6}")
+
+    # OPÇÃO 7: Logística FULL & Frete Grátis
+    if t_lower in ['7', 'logistica full', 'frete gratis', 'full']:
+        try:
+            r_full = con.execute(f"""
+                SELECT 
+                    SUM(CASE WHEN is_full = TRUE THEN qtd_vendas_num ELSE 0 END) AS qtd_full,
+                    SUM(qtd_vendas_num) AS qtd_tot,
+                    SUM(CASE WHEN frete_gratis = TRUE THEN qtd_vendas_num ELSE 0 END) AS qtd_fg
+                FROM fato_ml WHERE {where_tempo}
+            """).fetchone()
+            q_full, q_tot, q_fg = r_full[0] or 0, r_full[1] or 1, r_full[2] or 0
+            pct_full = (q_full / q_tot) * 100
+            pct_fg = (q_fg / q_tot) * 100
+
+            return (
+                f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n\n"
+                f"🚚 *Indicadores de Logística & Envios — {desc_tempo}:*\n\n"
+                f"⚡ *Mercado Envios FULL:* **{pct_full:.1f}%** das vendas ({q_full:,} de {q_tot:,} pedidos)\n"
+                f"🎁 *Frete Grátis Ativo:* **{pct_fg:.1f}%** das vendas ({q_fg:,} pedidos)\n\n"
+                f"💡 _Produtos no FULL e com Frete Grátis convertem até 2,4x mais no algoritmo do Mercado Livre._\n\n"
+                f"📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_"
+            )
+        except Exception as e_opt7:
+            logger.error(f"Erro opcao 7: {e_opt7}")
+
+    # OPÇÃO 8: Metadados da Base e Dicionário
+    if t_lower in ['8', 'dicionario', 'metadados']:
+        d_min = con.execute("SELECT MIN(data) FROM fato_ml").fetchone()[0]
+        return (
+            f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n\n"
+            f"ℹ️ *Metadados da Base Oficial (Mercado Livre)*\n\n"
+            f"📅 *Período Coberto:* De `{d_min}` até `{data_recente}`\n"
+            f"📦 *Total de Registros:* `{total_registros:,}` linhas colunares (DuckDB/Parquet)\n"
+            f"📂 *Categorias Macro:* 5 categorias oficiais\n"
+            f"🏷️ *Subcategorias:* Mais de 35 subcategorias mapeadas\n"
+            f"🏭 *Marcas Únicas:* Mais de 130 marcas monitoradas\n\n"
+            f"📖 *Principais Siglas do E-commerce:*\n"
+            f"• **YTDA:** Year To Date Actual (Acumulado do início do ano até a data de referência)\n"
+            f"• **MTD:** Month To Date (Acumulado do início do mês até a data de referência)\n"
+            f"• **FULL:** Logística própria Mercado Envios FULL (armazenamento e envio pelo Meli)\n"
+            f"• **Ticket Médio:** Faturamento total dividido pela quantidade de pedidos\n\n"
+            f"📌 _Base oficial do Projeto Power BI · Atualizado até {data_recente_fmt}_"
+        )
+
+    # --------------------------------------------------------------------------
+    # 4. RESPOSTAS CONCEITUAIS DO DICIONÁRIO DE DADOS OFICIAL
+    # --------------------------------------------------------------------------
     resp_dic = responder_dicionario_ou_conceito(texto_msg, user_name)
     if resp_dic:
         return resp_dic
 
-    # 3. Motor de Inteligência Analítica e Dicionário de Negócio
-    dt_obj = datetime.strptime(str(data_recente), "%Y-%m-%d")
-    ano_recente = dt_obj.year
-    mes_recente = dt_obj.month
-    ontem_str = (dt_obj - timedelta(days=1)).strftime("%Y-%m-%d")
-
-    # Mapeamento oficial de Categorias (Nível 1 - 5 categorias macro)
+    # --------------------------------------------------------------------------
+    # 5. MAPEAMENTOS OFICIAIS (CATEGORIAS, SUBCATEGORIAS E MARCAS)
+    # --------------------------------------------------------------------------
     MAPA_CATEGORIAS = {
         'informatica': 'Informática', 'informática': 'Informática', 'ti': 'Informática',
         'celular': 'Celulares e Telefones', 'celulares': 'Celulares e Telefones', 'telefone': 'Celulares e Telefones', 'telefones': 'Celulares e Telefones',
@@ -819,7 +1087,6 @@ def processar_pergunta(texto_msg, user_name):
         'casa': 'Casa, Móveis e Decoração', 'moveis': 'Casa, Móveis e Decoração', 'móveis': 'Casa, Móveis e Decoração', 'decoracao': 'Casa, Móveis e Decoração', 'decoração': 'Casa, Móveis e Decoração'
     }
 
-    # Mapeamento oficial de Subcategorias (Nível 2 subordinado à Categoria)
     MAPA_SUBCATEGORIAS = {
         # Celulares e Telefones
         'smartphones': ('Celulares e Telefones', 'Smartphones'), 'smartphone': ('Celulares e Telefones', 'Smartphones'),
@@ -881,155 +1148,158 @@ def processar_pergunta(texto_msg, user_name):
         'utensílios': ('Casa, Móveis e Decoração', 'Utensílios de Cozinha'), 'utensilios': ('Casa, Móveis e Decoração', 'Utensílios de Cozinha'),
         'artigos de festas': ('Casa, Móveis e Decoração', 'Artigos de Festas'),
         'jardim': ('Casa, Móveis e Decoração', 'Jardim'),
-        'malas': ('Casa, Móveis e Decoração', 'Malas'),
-
-        # Presentes em mais de uma Categoria macro
-        'cozinha': (None, 'Cozinha'),
-        'limpeza': (None, 'Limpeza'),
-        'lavanderia': (None, 'Lavanderia'),
-        'segurança': (None, 'Segurança'), 'seguranca': (None, 'Segurança'),
-        'acessórios': (None, 'Acessórios'), 'acessorios': (None, 'Acessórios')
+        'malas': ('Casa, Móveis e Decoração', 'Malas')
     }
 
-    # Detecção com tolerância a erros de digitação e variações de fala
-    subcat_synonyms = ['subcategoria', 'subcategorias', 'subcategira', 'sub-categoria', 'sub categoria', 'subcat', 'sub-cat', 'sub-categ']
-    disse_subcategoria = any(w in t_lower for w in subcat_synonyms)
+    # Lista abrangente das principais marcas monitoradas
+    LISTA_MARCAS_TOP = [
+        'Apple', 'Samsung', 'Xiaomi', 'Motorola', 'Dell', 'LG', 'Mondial', 'Tramontina',
+        'Electrolux', 'Logitech', 'Vonder', 'SanDisk', 'Baseus', 'TP-Link', 'Lorenzetti',
+        'Bosch', 'Redragon', 'Clamper', 'Sparta', 'WAP', '3M', 'Ugreen', 'Arno', 'Mor',
+        'Sony', 'Philco', 'Lenovo', 'Asus', 'Acer', 'HP', 'JBL', 'Kingston', 'Consul', 'Brastemp'
+    ]
 
-    cat_synonyms = ['categoria', 'categorias', 'categora', 'cat', 'categor']
-    disse_categoria = any(w in t_lower for w in cat_synonyms) and not disse_subcategoria
+    # Identificação de Marca
+    achou_marca = None
+    for mrc in LISTA_MARCAS_TOP:
+        if re.search(r'\b' + re.escape(mrc.lower()) + r'\b', t_lower):
+            achou_marca = mrc
+            break
 
+    # Identificação de Subcategoria
     achou_sub = None
     for k_sub, (cat_pai, sub_nome) in MAPA_SUBCATEGORIAS.items():
         if re.search(r'\b' + re.escape(k_sub) + r'\b', t_lower):
             achou_sub = (k_sub, cat_pai, sub_nome)
             break
 
-    # Se o usuário disse subcategoria mas não achou no mapa fixo, busca dinâmica no banco DuckDB
-    if disse_subcategoria and not achou_sub:
-        m_cand = re.search(r'(?:subcategoria|subcategorias|subcategira|sub-categoria|sub categoria|subcat)\s+(?:de\s+|da\s+|do\s+)?([a-z0-9áéíóúãõç\s]+)', t_lower)
-        if m_cand:
-            termo = m_cand.group(1).strip()
-            for stop in ['no mtd', 'no ytda', 'hoje', 'ontem', 'no ano', 'no mes']:
-                termo = termo.replace(stop, '').strip()
-            if termo:
-                row_dyn = con.execute(f"SELECT DISTINCT categoria, subcategoria FROM fato_ml WHERE subcategoria ILIKE '%{termo}%' LIMIT 1").fetchone()
-                if row_dyn:
-                    achou_sub = (termo, row_dyn[0], row_dyn[1])
-
+    # Identificação de Categoria
     achou_cat = None
     for k_cat, cat_nome in MAPA_CATEGORIAS.items():
         if re.search(r'\b' + re.escape(k_cat) + r'\b', t_lower):
             achou_cat = (k_cat, cat_nome)
             break
 
-    # Quando o usuário pede algo como Categoria, mas o nome é de uma Subcategoria
+    # Detecção se o usuário disse explicitamente "categoria" ou "subcategoria"
+    subcat_synonyms = ['subcategoria', 'subcategorias', 'subcategira', 'sub-categoria', 'sub categoria', 'subcat']
+    disse_subcategoria = any(w in t_lower for w in subcat_synonyms)
+
+    cat_synonyms = ['categoria', 'categorias', 'categora', 'cat']
+    disse_categoria = any(w in t_lower for w in cat_synonyms) and not disse_subcategoria
+
+    # Alerta Didático (caso confunda Categoria com Subcategoria)
     alerta_didatico = None
     if disse_categoria and achou_sub and not achou_cat:
         k_sub, cat_pai, sub_nome = achou_sub
         if cat_pai:
-            alerta_didatico = (
-                f"💡 *Aviso Didático:* Olha, o que você pediu como categoria (*'{sub_nome}'*) não existe como Categoria "
-                f"porque na verdade é uma **Subcategoria**! A categoria mãe dela é **'{cat_pai}'**."
-            )
-        else:
-            alerta_didatico = (
-                f"💡 *Aviso Didático:* Olha, o que você pediu como categoria (*'{sub_nome}'*) não existe como Categoria "
-                f"porque na verdade é uma **Subcategoria**."
-            )
-    # Quando o usuário pede algo como Subcategoria, mas o nome é de uma Categoria principal
+            alerta_didatico = f"💡 *Aviso Didático:* Você pediu como Categoria, mas *'{sub_nome}'* na verdade é uma **Subcategoria**! A categoria mãe dela é **'{cat_pai}'**."
     elif disse_subcategoria and achou_cat and not achou_sub:
         k_cat, cat_nome = achou_cat
-        alerta_didatico = (
-            f"💡 *Aviso Didático:* Olha, você pesquisou como subcategoria, mas **'{cat_nome}'** é uma **Categoria principal** "
-            f"(Nível 1), e não uma subcategoria!"
-        )
-
-    # Resolução temporal precisa: YTDA, MTD, Ontem, Hoje ou Data Específica
-    where_tempo = f"data = '{data_recente}'"
-    desc_tempo = f"Hoje ({data_recente})"
-
-    if any(k in t_lower for k in ['ytda', 'ytd', 'acumulado no ano', 'acumulado do ano', 'no ano', 'deste ano', 'ano atual']):
-        where_tempo = f"ano = {ano_recente} AND data <= '{data_recente}'"
-        desc_tempo = f"YTDA {ano_recente} (Acumulado no Ano até {data_recente})"
-    elif any(k in t_lower for k in ['mtd', 'acumulado no mês', 'acumulado no mes', 'acumulado do mês', 'acumulado do mes', 'no mês', 'no mes', 'deste mês', 'deste mes', 'mês atual', 'mes atual']):
-        where_tempo = f"ano = {ano_recente} AND mes = {mes_recente} AND data <= '{data_recente}'"
-        desc_tempo = f"MTD (Acumulado no Mês {mes_recente:02d}/{ano_recente} até {data_recente})"
-    elif 'ontem' in t_lower:
-        where_tempo = f"data = '{ontem_str}'"
-        desc_tempo = f"Ontem ({ontem_str})"
-    else:
-        m_iso = re.search(r'\b(202[5-9])-(\d{2})-(\d{2})\b', t_lower)
-        m_br = re.search(r'\b(\d{1,2})[/.-](\d{1,2})(?:[/.-](202[5-9]))?\b', t_lower)
-        if m_iso:
-            d_alvo = m_iso.group(0)
-            where_tempo = f"data = '{d_alvo}'"
-            desc_tempo = f"Data {d_alvo}"
-        elif m_br:
-            d, m, y = m_br.groups()
-            d_alvo = f"{y if y else ano_recente}-{int(m):02d}-{int(d):02d}"
-            where_tempo = f"data = '{d_alvo}'"
-            desc_tempo = f"Data {int(d):02d}/{int(m):02d}/{y if y else ano_recente}"
+        alerta_didatico = f"💡 *Aviso Didático:* Você pediu como Subcategoria, mas **'{cat_nome}'** é uma **Categoria principal** (Nível 1)!"
 
     clean_sql = None
 
-    # Consulta de metadados da base
-    if "data" in t_lower and any(w in t_lower for w in ["recente", "ultima", "última", "atualizada", "base"]) and not any(w in t_lower for w in ["venda", "fatur", "quanto", "categoria", "ytda", "mtd"]):
-        clean_sql = f"SELECT '{data_recente}' AS data_mais_recente, COUNT(*) AS total_registros FROM fato_ml"
+    # --------------------------------------------------------------------------
+    # 6. RESOLUÇÃO ANALÍTICA DETERMINÍSTICA (ZERO ALUCINAÇÃO)
+    # --------------------------------------------------------------------------
+    
+    # CASO A: MARCA ESPECÍFICA DETECTADA (Apple, Samsung, Xiaomi, etc.)
+    if achou_marca:
+        try:
+            r_marca = con.execute(f"""
+                SELECT 
+                    '{desc_tempo}' AS periodo,
+                    '{achou_marca}' AS marca,
+                    SUM(fat_num) AS faturamento,
+                    SUM(qtd_vendas_num) AS vendas,
+                    ROUND(SUM(fat_num) / NULLIF(SUM(qtd_vendas_num), 0), 2) AS ticket_medio
+                FROM fato_ml
+                WHERE {where_tempo} AND marca ILIKE '%{achou_marca}%'
+            """).fetchone()
 
-    # Resolução Analítica Determinística (Zero alucinação, precisão 100%)
-    if not clean_sql:
-        # A. Subcategoria específica mencionada (ou resolvida no mapa ou dinamicamente)
-        if achou_sub:
-            k_sub, cat_pai, sub_nome = achou_sub
-            if cat_pai:
-                clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_pai}' AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria"
-            else:
-                clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria ORDER BY faturamento DESC"
+            top_prods_mrc = con.execute(f"""
+                SELECT titulo_produto, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento
+                FROM fato_ml
+                WHERE {where_tempo} AND marca ILIKE '%{achou_marca}%'
+                GROUP BY titulo_produto
+                ORDER BY faturamento DESC
+                LIMIT 3
+            """).fetchall()
 
-        # B. Categoria específica mencionada (SEMPRE responde a categoria solicitada, NUNCA o total)
-        elif achou_cat:
-            k_cat, cat_nome = achou_cat
-            clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_nome}' GROUP BY categoria"
+            fat_mrc = r_marca[2] or 0.0
+            vendas_mrc = r_marca[3] or 0
+            tkt_mrc = r_marca[4] or 0.0
 
-        # C. Ranking de TODAS as subcategorias
-        elif disse_subcategoria and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por subcategoria']):
-            clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} GROUP BY categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
+            fat_mrc_str = f"R$ {fat_mrc:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+            tkt_mrc_str = f"R$ {tkt_mrc:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
-        # D. Ranking de TODAS as categorias
-        elif disse_categoria and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por categoria']):
-            clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} GROUP BY categoria ORDER BY faturamento DESC"
+            if vendas_mrc > 0:
+                linhas_m = [
+                    f"📊 *Olá {user_name}! Pesquisei aqui vejamos o resultado:*\n",
+                    f"🏷️ *Desempenho da Marca {achou_marca}*",
+                    f"📅 *Período:* {desc_tempo}\n",
+                    f"💰 *Faturamento Total:* `{fat_mrc_str}`",
+                    f"📦 *Volume de Vendas:* `{vendas_mrc:,}` pedidos",
+                    f"🎯 *Ticket Médio:* `{tkt_mrc_str}`\n"
+                ]
 
-        # E. Ranking de produtos mais vendidos
-        elif any(w in t_lower for w in ['produto', 'anuncio', 'anúncio', 'item', 'mais vendido', 'mais vendid']):
-            clean_sql = f"SELECT '{desc_tempo}' AS periodo, titulo_produto, marca, categoria, subcategoria, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento FROM fato_ml WHERE {where_tempo} GROUP BY titulo_produto, marca, categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
+                if top_prods_mrc:
+                    linhas_m.append(f"🏆 *Top Anúncios Mais Vendidos ({achou_marca}):*")
+                    for idx, (p_tit, p_qtd, p_fat) in enumerate(top_prods_mrc, 1):
+                        p_fat_str = f"R$ {p_fat:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+                        linhas_m.append(f"{idx}. *{p_tit}* — {p_qtd:,} un ({p_fat_str})")
+                    linhas_m.append("")
 
-        # F. Total Geral do Período (BLINDAGEM TOTAL: NUNCA roda se o usuário falou categoria, subcategoria, produto, marca ou achou entidades)
-        elif any(w in t_lower for w in ['total', 'geral', 'faturamento', 'faturou', 'vendas', 'vendeu', 'resultado']):
-            if not disse_subcategoria and not disse_categoria and not achou_sub and not achou_cat and not any(w in t_lower for w in ['produto', 'anuncio', 'item', 'marca']):
-                clean_sql = f"SELECT '{desc_tempo}' AS periodo, SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_pedidos FROM fato_ml WHERE {where_tempo}"
+                linhas_m.append(f"📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_")
+                return "\n".join(linhas_m)
+        except Exception as e_mrc:
+            logger.error(f"Erro ao processar marca {achou_marca}: {e_mrc}")
 
-    # 3. Text-to-SQL de Contingência via Gemini (para consultas livres não cobertas pelas regras acima)
+    # CASO B: SUBCATEGORIA ESPECÍFICA DETECTADA (Smartwatches, Smartphones, etc.)
+    if achou_sub:
+        k_sub, cat_pai, sub_nome = achou_sub
+        if cat_pai:
+            clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_pai}' AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria"
+        else:
+            clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria ORDER BY faturamento DESC"
+
+    # CASO C: CATEGORIA ESPECÍFICA DETECTADA
+    elif achou_cat:
+        k_cat, cat_nome = achou_cat
+        clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_nome}' GROUP BY categoria"
+
+    # CASO D: RANKING DE SUB OU CATEGORIAS
+    elif disse_subcategoria and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por subcategoria']):
+        clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} GROUP BY categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
+
+    elif disse_categoria and any(w in t_lower for w in ['todas', 'ranking', 'quais', 'mais vendid', 'maior', 'cada', 'por categoria']):
+        clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} GROUP BY categoria ORDER BY faturamento DESC"
+
+    # CASO E: PRODUTOS MAIS VENDIDOS
+    elif any(w in t_lower for w in ['produto', 'anuncio', 'anúncio', 'item', 'mais vendido', 'mais vendid']):
+        clean_sql = f"SELECT '{desc_tempo}' AS periodo, titulo_produto, marca, categoria, subcategoria, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento FROM fato_ml WHERE {where_tempo} GROUP BY titulo_produto, marca, categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
+
+    # CASO F: TOTAL GERAL DO PERÍODO
+    elif any(w in t_lower for w in ['total', 'geral', 'faturamento', 'faturou', 'vendas', 'vendeu', 'resultado']):
+        if not disse_subcategoria and not disse_categoria and not achou_sub and not achou_cat and not achou_marca:
+            clean_sql = f"SELECT '{desc_tempo}' AS periodo, SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_pedidos FROM fato_ml WHERE {where_tempo}"
+
+    # --------------------------------------------------------------------------
+    # 7. TEXT-TO-SQL VIA GEMINI (CONTINGÊNCIA PARA CONSULTAS LIVRES)
+    # --------------------------------------------------------------------------
     if not clean_sql:
         prompt_sql = f"""
-Você é o motor analítico SQL DuckDB especialista em dados de vendas e inteligência analítica.
+Você é o motor analítico SQL DuckDB do robô 'Joca Meli' (Mercado Livre Brasil).
 Tabela: 'fato_ml' | Período solicitado: {desc_tempo} (filtro: {where_tempo})
 
-REGRAS DE TEMPO CRUCIAIS:
-- YTDA / YTD: Acumulado no ano -> ano = {ano_recente} AND data <= '{data_recente}'
-- MTD: Acumulado no mês -> ano = {ano_recente} AND mes = {mes_recente} AND data <= '{data_recente}'
-- Ontem: data = '{ontem_str}'
-- Hoje / Atual: data = '{data_recente}'
+REGRAS TEMPORAIS ESTRITAS:
+- Período WHERE obrigatório: {where_tempo}
+- JAMAIS ignore o ano solicitado pelo usuário!
 
-HIERARQUIA OFICIAL (CATEGORIA VEM ANTES DA SUBCATEGORIA):
+HIERARQUIA OFICIAL:
 1. Categorias: 'Celulares e Telefones', 'Informática', 'Eletrodomésticos', 'Ferramentas e Construção', 'Casa, Móveis e Decoração'.
-2. Subcategorias: 'Smartphones', 'Notebooks', 'Hardware', 'Periféricos', 'Cozinha', 'Climatização', 'Manuais', 'Elétrica', 'Cama e Banho', 'Móveis'.
-3. Produtos e Marcas: 'titulo_produto', 'marca'.
-4. Métricas: fat_num (faturamento R$), qtd_vendas_num (pedidos).
-
-REGRA FUNDAMENTAL:
-- Se perguntar sobre uma CATEGORIA, filtre por 'categoria' e NUNCA retorne o total geral!
-- Se perguntar sobre uma SUBCATEGORIA, filtre por 'subcategoria' e traga a Categoria associada!
-- Se perguntar YTDA, use ano = {ano_recente} AND data <= '{data_recente}' e NUNCA o dia atual isolado!
+2. Subcategorias: 'Smartphones', 'Smartwatches', 'Notebooks', 'Hardware', 'Periféricos', 'Cozinha', 'Climatização', 'Manuais', 'Elétrica', 'Cama e Banho', 'Móveis'.
+3. Colunas: fat_num (faturamento R$), qtd_vendas_num (pedidos), marca, titulo_produto.
 
 Pergunta do usuário: "{texto_msg}"
 Retorne EXCLUSIVAMENTE a query SQL DuckDB dentro de ```sql ... ``` ou 'NAO_SQL'.
@@ -1048,14 +1318,14 @@ Retorne EXCLUSIVAMENTE a query SQL DuckDB dentro de ```sql ... ``` ou 'NAO_SQL'.
         rows = cur.fetchall()
         
         if not rows:
-            return f"📊 Olá {user_name}! Pesquisei aqui na base oficial mas não encontrei registros para essa pesquisa específica."
+            return f"📊 Olá {user_name}! Pesquisei aqui na base oficial mas não encontrei registros para essa pesquisa no período ({desc_tempo})."
 
         header_str = " | ".join(col_names)
         linhas_tab = [" | ".join([str(v) if v is not None else "NULL" for v in r]) for r in rows[:15]]
         tabela_str = f"{header_str}\n" + ("-" * len(header_str)) + "\n" + "\n".join(linhas_tab)
 
         prompt_formatacao = f"""
-Você é o assistente executivo Joca_BigQuery. O usuário '{user_name}' perguntou: "{texto_msg}"
+Você é o assistente executivo 'Joca Meli' do Mercado Livre. O usuário '{user_name}' perguntou: "{texto_msg}"
 Dados extraídos do banco oficial referente a ({desc_tempo}):
 {tabela_str}
 
@@ -1063,13 +1333,12 @@ Dados extraídos do banco oficial referente a ({desc_tempo}):
 
 Formate uma resposta executiva impecável para o Telegram:
 - Saudação obrigatória: "📊 Olá {user_name}! Pesquisei aqui vejamos o resultado:"
-{f"- IMEDIATAMENTE após a saudação, inclua com destaque o Aviso Didático explicando que o usuário se confundiu entre Categoria e Subcategoria (use o texto do aviso acima)!\n" if alerta_didatico else ""}
+{f"- IMEDIATAMENTE após a saudação, inclua o Aviso Didático explicando a diferença entre Categoria e Subcategoria!\n" if alerta_didatico else ""}
 - Destaque o período consultado ({desc_tempo}).
-- Respeite rigorosamente a hierarquia: Categoria vem antes da Subcategoria!
+- Respeite rigorosamente a hierarquia do Mercado Livre.
 - Apresente os números formatados em moeda (R$) e quantidades com separadores de milhar (ex: R$ 3.818.209,99 e 11.119 pedidos).
 - Use tópicos claros, negrito e emojis comerciais nos pontos-chave.
-- Se houver lista de itens ou categorias, numere com clareza.
-- Rodapé obrigatório: "📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente}_"
+- Rodapé obrigatório: "📌 _Dados da Base Analítica (Power BI) · Atualizado até {data_recente_fmt}_"
 """
         resp_final = chamar_gemini(prompt_formatacao)
         return resp_final if resp_final else formatar_resultado_python(col_names, rows, user_name, texto_msg, alerta=alerta_didatico)
