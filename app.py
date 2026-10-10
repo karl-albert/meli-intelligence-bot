@@ -828,25 +828,25 @@ def processar_pergunta(texto_msg, user_name):
 
     if quer_ytda:
         if ano_alvo and ano_alvo != ano_recente:
-            # Período homólogo acumulado no ano anterior até o mesmo dia/mês
+            # Período homólogo móvel acumulado no ano anterior até o mesmo dia/mês (anda dia a dia com a base)
             data_corte_alvo = f"{ano_alvo}-{mes_recente:02d}-{dia_recente:02d}"
-            where_tempo = f"ano = {ano_alvo} AND data <= '{data_corte_alvo}'"
-            desc_tempo = f"YTDA {ano_alvo} (Homólogo até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
+            where_tempo = f"data >= '{ano_alvo}-01-01' AND data <= '{data_corte_alvo}'"
+            desc_tempo = f"YTDA {ano_alvo} (Homólogo de 01/01/{ano_alvo} até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
         else:
-            where_tempo = f"ano = {ano_recente} AND data <= '{data_recente}'"
-            desc_tempo = f"YTDA {ano_recente} (Acumulado no Ano até {data_recente_fmt})"
+            where_tempo = f"data >= '{ano_recente}-01-01' AND data <= '{data_recente}'"
+            desc_tempo = f"YTDA {ano_recente} (Acumulado de 01/01/{ano_recente} até {data_recente_fmt})"
     elif quer_mtd:
         if ano_alvo and ano_alvo != ano_recente:
             data_corte_alvo = f"{ano_alvo}-{mes_recente:02d}-{dia_recente:02d}"
-            where_tempo = f"ano = {ano_alvo} AND mes = {mes_recente} AND data <= '{data_corte_alvo}'"
-            desc_tempo = f"MTD {mes_recente:02d}/{ano_alvo} (Homólogo até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
+            where_tempo = f"data >= '{ano_alvo}-{mes_recente:02d}-01' AND data <= '{data_corte_alvo}'"
+            desc_tempo = f"MTD {mes_recente:02d}/{ano_alvo} (Homólogo de 01/{mes_recente:02d}/{ano_alvo} até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
         else:
             where_tempo = f"ano = {ano_recente} AND mes = {mes_recente} AND data <= '{data_recente}'"
             desc_tempo = f"MTD (Acumulado no Mês {mes_recente:02d}/{ano_recente} até {data_recente_fmt})"
     elif ano_alvo and ano_alvo != ano_recente:
         # Usuário pediu um ano anterior fechado sem falar YTDA (ex: "em 2025" ou "no ano de 2025")
         where_tempo = f"ano = {ano_alvo}"
-        desc_tempo = f"Ano Completo de {ano_alvo}"
+        desc_tempo = f"Ano Completo de {ano_alvo} (01/01/{ano_alvo} a 31/12/{ano_alvo})"
     elif quer_ontem:
         where_tempo = f"data = '{ontem_str}'"
         desc_tempo = f"Ontem ({ontem_str})"
@@ -1693,7 +1693,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.3.0 - Auditoria Dupla B3 (Acoes e Indices EUA)",
+        "versao": "3.4.0 - Inteligência Temporal Homóloga YTDA e Blindagem Meli",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "horario_disponibilizacao": horario_bot,
