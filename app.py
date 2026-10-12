@@ -111,6 +111,7 @@ SYNC_SECRET = os.environ.get("SYNC_SECRET", "joca_sync_2026_karl")
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PARQUET_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_MaisVendidos.parquet").replace("\\", "/")
+PARQUET_METAS_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_Metas.parquet").replace("\\", "/")
 B3_DB_PATH = os.path.join(BASE_DIR, "b3_database.duckdb").replace("\\", "/")
 DICIONARIO_FILE = os.path.join(BASE_DIR, "dicionario_dados_ml.json")
 
@@ -245,6 +246,29 @@ def recarregar_duckdb():
     total_registros = con.execute("SELECT COUNT(*) FROM fato_ml").fetchone()[0]
     data_inicio = con.execute("SELECT MIN(data) FROM fato_ml").fetchone()[0]
     
+    # Carrega também a tabela fato_metas se existir
+    if os.path.exists(PARQUET_METAS_FILE):
+        con.execute("DROP TABLE IF EXISTS fato_metas")
+        con.execute(f"""
+            CREATE TABLE fato_metas AS 
+            SELECT 
+                data, 
+                ano, 
+                mes, 
+                ano_mes,
+                posicao_ranking,
+                categoria, 
+                subcategoria, 
+                titulo_produto, 
+                marca, 
+                TRY_CAST(qtd_vendas_estimadas_dia AS INT) as qtd_vendas_num, 
+                TRY_CAST(REPLACE(REPLACE(faturamento_estimado_dia, '.', ''), ',', '.') AS DOUBLE) as fat_num, 
+                TRY_CAST(REPLACE(REPLACE(preco_atual, '.', ''), ',', '.') AS DOUBLE) as preco_num
+            FROM '{PARQUET_METAS_FILE}'
+        """)
+        total_metas = con.execute("SELECT COUNT(*) FROM fato_metas").fetchone()[0]
+        logger.info(f"[OK] Tabela fato_metas carregada no DuckDB: {total_metas:,} registros.")
+
     # Registra o horario exato em que o dado ficou disponivel para o Bot (Fuso Brasilia UTC-3)
     try:
         if os.path.exists(PARQUET_FILE):
@@ -803,9 +827,10 @@ def processar_pergunta(texto_msg, user_name):
             f"5️⃣ *Top Produtos Mais Vendidos* (Os anúncios líderes de receita)\n"
             f"6️⃣ *Análise por Marca* (Apple, Samsung, Xiaomi, Dell, LG, Mondial, etc.)\n"
             f"7️⃣ *Logística FULL & Frete Grátis* (Penetração e conversão)\n"
-            f"8️⃣ *Dicionário & Metadados da Base* (Estrutura e conceitos)\n\n"
-            f"💡 _Você pode digitar o número correspondente (1 a 8) ou perguntar diretamente!_\n"
-            f"Exemplos: _\"Samsung no YTDA do ano passado\"_, _\"smartwatches no YTDA 2025\"_, _\"faturamento de Apple hoje\"_."
+            f"8️⃣ *Dicionário & Metadados da Base* (Estrutura e conceitos)\n"
+            f"9️⃣ *Batimento de Metas (Real vs Meta)* (Atingimento por Categoria e Geral)\n\n"
+            f"💡 _Você pode digitar o número correspondente (1 a 9) ou perguntar diretamente!_\n"
+            f"Exemplos: _\"Como está a meta de Celulares?\"_, _\"Ferramentas bateu a meta no YTDA?\"_, _\"meta de Informática\"_."
         )
 
     # --------------------------------------------------------------------------
@@ -1069,6 +1094,64 @@ def processar_pergunta(texto_msg, user_name):
             f"📌 _Base oficial do Projeto Power BI · Atualizado até {data_recente_fmt}_"
         )
 
+    # OPÇÃO 9: Batimento de Metas (Real vs Meta Geral)
+    if t_lower in ['9', 'metas', 'meta', 'batimento de metas', 'atingimento de metas']:
+        try:
+            cur_metas = con.execute(f"""
+                WITH r AS (
+                    SELECT categoria, SUM(fat_num) as fat_real, SUM(qtd_vendas_num) as qtd_real
+                    FROM fato_ml WHERE {where_tempo}
+                    GROUP BY categoria
+                ),
+                m AS (
+                    SELECT categoria, SUM(fat_num) as fat_meta, SUM(qtd_vendas_num) as qtd_meta
+                    FROM fato_metas WHERE {where_tempo}
+                    GROUP BY categoria
+                )
+                SELECT 
+                    COALESCE(r.categoria, m.categoria) as categoria,
+                    COALESCE(r.fat_real, 0) as fat_real,
+                    COALESCE(m.fat_meta, 0) as fat_meta,
+                    ROUND((COALESCE(r.fat_real, 0) / NULLIF(m.fat_meta, 0)) * 100, 2) as ating_fat,
+                    COALESCE(r.fat_real, 0) - COALESCE(m.fat_meta, 0) as gap_fat,
+                    COALESCE(r.qtd_real, 0) as qtd_real,
+                    COALESCE(m.qtd_meta, 0) as qtd_meta,
+                    ROUND((COALESCE(r.qtd_real, 0) / NULLIF(m.qtd_meta, 0)) * 100, 2) as ating_qtd
+                FROM r
+                FULL OUTER JOIN m ON r.categoria = m.categoria
+                ORDER BY r.fat_real DESC
+            """).fetchall()
+
+            tot_r = sum(c[1] for c in cur_metas)
+            tot_m = sum(c[2] for c in cur_metas)
+            tot_ating = (tot_r / tot_m * 100) if tot_m > 0 else 0
+            tot_gap = tot_r - tot_m
+
+            badge_tot = "🟢" if tot_ating >= 95 else ("🟡" if tot_ating >= 90 else "🔴")
+
+            linhas = [
+                f"📊 *Olá {user_name}! Pesquisei aqui o batimento de metas:*\n",
+                f"🎯 *Painel de Metas & Atingimento — {desc_tempo}*\n",
+                f"🏢 *Total Geral:* {badge_tot} **{tot_ating:.2f}%**",
+                f"💰 Real: R$ {tot_r/1e6:,.2f} MM | Meta: R$ {tot_m/1e6:,.2f} MM (Dif: R$ {tot_gap/1e6:+,.2f} MM)\n",
+                "━━━━━━━━━━━━━━━━━━━━",
+                "📂 *Desempenho por Categoria:*\n"
+            ]
+
+            for cat, f_r, f_m, at_f, gp_f, q_r, q_m, at_q in cur_metas:
+                # Regra de Cores Executiva: >= 95% Verde, 90-94.99% Amarelo, < 90% Vermelho
+                b_cor = "🟢" if (at_f or 0) >= 95 else ("🟡" if (at_f or 0) >= 90 else "🔴")
+                dif_str = f"R$ {gp_f/1e6:+,.2f} MM" if abs(gp_f) >= 1e6 else f"R$ {gp_f:+,.2f}"
+                linhas.append(f"{b_cor} *{cat}:* **{at_f:.2f}%**")
+                linhas.append(f"   • Fat: R$ {f_r/1e6:,.2f} MM / Meta: R$ {f_m/1e6:,.2f} MM ({dif_str})")
+                linhas.append(f"   • Vendas: {q_r:,.0f} un / Meta: {q_m:,.0f} un ({at_q:.1f}%)\n")
+
+            linhas.append("💡 *Legenda:* 🟢 ≥95% (No Alvo) | 🟡 90-94,99% (Atenção) | 🔴 <90% (Crítico)")
+            linhas.append(f"📌 _Dados sincronizados da base de Metas (Power BI) · Atualizado até {data_recente_fmt}_")
+            return "\n".join(linhas)
+        except Exception as e_opt9:
+            logger.error(f"Erro opcao 9: {e_opt9}")
+
     # --------------------------------------------------------------------------
     # 4. RESPOSTAS CONCEITUAIS DO DICIONÁRIO DE DADOS OFICIAL
     # --------------------------------------------------------------------------
@@ -1268,17 +1351,131 @@ def processar_pergunta(texto_msg, user_name):
         except Exception as e_mrc:
             logger.error(f"Erro ao processar marca {achou_marca}: {e_mrc}")
 
-    # CASO B: SUBCATEGORIA ESPECÍFICA DETECTADA (Smartwatches, Smartphones, etc.)
-    if achou_sub:
+    # CASO B: SE DETECTOU CATEGORIA OU SUBCATEGORIA COM META
+    # Se achou_cat foi detectada, priorizar Categoria (ex: "Ferramentas e Construção" tem categoria macro homônima à subcategoria "Construção")
+    if achou_cat and any(w in t_lower for w in ['meta', 'metas', 'batimento', 'atingimento', 'bateu']):
+        k_cat, cat_nome = achou_cat
+        try:
+            r_cat_meta = con.execute(f"""
+                WITH r AS (
+                    SELECT categoria, SUM(fat_num) as fat_real, SUM(qtd_vendas_num) as qtd_real
+                    FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_nome}'
+                    GROUP BY categoria
+                ),
+                m AS (
+                    SELECT categoria, SUM(fat_num) as fat_meta, SUM(qtd_vendas_num) as qtd_meta
+                    FROM fato_metas WHERE {where_tempo} AND categoria = '{cat_nome}'
+                    GROUP BY categoria
+                )
+                SELECT 
+                    COALESCE(r.fat_real, 0) as fat_real,
+                    COALESCE(m.fat_meta, 0) as fat_meta,
+                    ROUND((COALESCE(r.fat_real, 0) / NULLIF(m.fat_meta, 0)) * 100, 2) as ating_fat,
+                    COALESCE(r.fat_real, 0) - COALESCE(m.fat_meta, 0) as gap_fat,
+                    COALESCE(r.qtd_real, 0) as qtd_real,
+                    COALESCE(m.qtd_meta, 0) as qtd_meta,
+                    ROUND((COALESCE(r.qtd_real, 0) / NULLIF(m.qtd_meta, 0)) * 100, 2) as ating_qtd
+                FROM r
+                FULL OUTER JOIN m ON r.categoria = m.categoria
+            """).fetchone()
+
+            if r_cat_meta:
+                f_r, f_m, at_f, gp_f, q_r, q_m, at_q = r_cat_meta
+                at_f = at_f or 0.0
+                b_cor = "🟢" if at_f >= 95 else ("🟡" if at_f >= 90 else "🔴")
+                status_txt = "Meta Batida / No Alvo" if at_f >= 95 else ("Atenção / Próximo da Meta" if at_f >= 90 else "Abaixo da Meta / Alerta Crítico")
+                
+                dif_fat_str = f"R$ {gp_f/1e6:+,.2f} MM" if abs(gp_f) >= 1e6 else f"R$ {gp_f:+,.2f}"
+                tkt_r = (f_r / q_r) if q_r > 0 else 0
+                tkt_m = (f_m / q_m) if q_m > 0 else 0
+                at_tkt = (tkt_r / tkt_m * 100) if tkt_m > 0 else 100
+
+                return (
+                    f"📊 *Olá {user_name}! Pesquisei aqui o batimento da categoria:*\n\n"
+                    f"🎯 *Batimento de Metas: {cat_nome}*\n"
+                    f"📅 *Período:* {desc_tempo}\n"
+                    f"🚦 *Status Executivo:* {b_cor} **{status_txt}** ({at_f:.2f}% de Atingimento)\n\n"
+                    f"💰 *Faturamento:* `{at_f:.2f}%` atingido\n"
+                    f"   • Realizado: `R$ {f_r/1e6:,.2f} MM`\n"
+                    f"   • Meta: `R$ {f_m/1e6:,.2f} MM`\n"
+                    f"   • Diferença (Gap): `{dif_fat_str}`\n\n"
+                    f"📦 *Volume de Vendas:* `{at_q:.2f}%` atingido\n"
+                    f"   • Realizado: `{q_r:,.0f}` pedidos\n"
+                    f"   • Meta: `{q_m:,.0f}` pedidos\n\n"
+                    f"🎯 *Ticket Médio:* `R$ {tkt_r:,.2f}` (Meta: `R$ {tkt_m:,.2f}` | Ating: `{at_tkt:.2f}%`)\n\n"
+                    f"💡 *Código de Cores:* 🟢 ≥95% (Verde) | 🟡 90% a 94,99% (Amarelo) | 🔴 <90% (Vermelho)\n"
+                    f"📌 _Dados sincronizados da base de Metas (Power BI) · Atualizado até {data_recente_fmt}_"
+                )
+        except Exception as e_cat_meta:
+            logger.error(f"Erro ao calcular meta de {cat_nome}: {e_cat_meta}")
+
+    # CASO C: SUBCATEGORIA ESPECÍFICA DETECTADA (Smartwatches, Smartphones, etc.)
+    if achou_sub and not (achou_cat and any(w in t_lower for w in ['categoria', 'meta', 'metas'])):
         k_sub, cat_pai, sub_nome = achou_sub
         if cat_pai:
             clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_pai}' AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria"
         else:
             clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, subcategoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND subcategoria = '{sub_nome}' GROUP BY categoria, subcategoria ORDER BY faturamento DESC"
 
-    # CASO C: CATEGORIA ESPECÍFICA DETECTADA
+    # CASO D: CATEGORIA ESPECÍFICA DETECTADA
     elif achou_cat:
         k_cat, cat_nome = achou_cat
+        disse_meta = any(w in t_lower for w in ['meta', 'metas', 'batimento', 'atingimento', 'bateu'])
+        if disse_meta:
+            try:
+                r_cat_meta = con.execute(f"""
+                    WITH r AS (
+                        SELECT categoria, SUM(fat_num) as fat_real, SUM(qtd_vendas_num) as qtd_real
+                        FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_nome}'
+                        GROUP BY categoria
+                    ),
+                    m AS (
+                        SELECT categoria, SUM(fat_num) as fat_meta, SUM(qtd_vendas_num) as qtd_meta
+                        FROM fato_metas WHERE {where_tempo} AND categoria = '{cat_nome}'
+                        GROUP BY categoria
+                    )
+                    SELECT 
+                        COALESCE(r.fat_real, 0) as fat_real,
+                        COALESCE(m.fat_meta, 0) as fat_meta,
+                        ROUND((COALESCE(r.fat_real, 0) / NULLIF(m.fat_meta, 0)) * 100, 2) as ating_fat,
+                        COALESCE(r.fat_real, 0) - COALESCE(m.fat_meta, 0) as gap_fat,
+                        COALESCE(r.qtd_real, 0) as qtd_real,
+                        COALESCE(m.qtd_meta, 0) as qtd_meta,
+                        ROUND((COALESCE(r.qtd_real, 0) / NULLIF(m.qtd_meta, 0)) * 100, 2) as ating_qtd
+                    FROM r
+                    FULL OUTER JOIN m ON r.categoria = m.categoria
+                """).fetchone()
+
+                if r_cat_meta:
+                    f_r, f_m, at_f, gp_f, q_r, q_m, at_q = r_cat_meta
+                    at_f = at_f or 0.0
+                    b_cor = "🟢" if at_f >= 95 else ("🟡" if at_f >= 90 else "🔴")
+                    status_txt = "Meta Batida / No Alvo" if at_f >= 95 else ("Atenção / Próximo da Meta" if at_f >= 90 else "Abaixo da Meta / Alerta Crítico")
+                    
+                    dif_fat_str = f"R$ {gp_f/1e6:+,.2f} MM" if abs(gp_f) >= 1e6 else f"R$ {gp_f:+,.2f}"
+                    tkt_r = (f_r / q_r) if q_r > 0 else 0
+                    tkt_m = (f_m / q_m) if q_m > 0 else 0
+                    at_tkt = (tkt_r / tkt_m * 100) if tkt_m > 0 else 100
+
+                    return (
+                        f"📊 *Olá {user_name}! Pesquisei aqui o batimento da categoria:*\n\n"
+                        f"🎯 *Batimento de Metas: {cat_nome}*\n"
+                        f"📅 *Período:* {desc_tempo}\n"
+                        f"🚦 *Status Executivo:* {b_cor} **{status_txt}** ({at_f:.2f}% de Atingimento)\n\n"
+                        f"💰 *Faturamento:* `{at_f:.2f}%` atingido\n"
+                        f"   • Realizado: `R$ {f_r/1e6:,.2f} MM`\n"
+                        f"   • Meta: `R$ {f_m/1e6:,.2f} MM`\n"
+                        f"   • Diferença (Gap): `{dif_fat_str}`\n\n"
+                        f"📦 *Volume de Vendas:* `{at_q:.2f}%` atingido\n"
+                        f"   • Realizado: `{q_r:,.0f}` pedidos\n"
+                        f"   • Meta: `{q_m:,.0f}` pedidos\n\n"
+                        f"🎯 *Ticket Médio:* `R$ {tkt_r:,.2f}` (Meta: `R$ {tkt_m:,.2f}` | Ating: `{at_tkt:.2f}%`)\n\n"
+                        f"💡 *Código de Cores:* 🟢 ≥95% (Verde) | 🟡 90% a 94,99% (Amarelo) | 🔴 <90% (Vermelho)\n"
+                        f"📌 _Dados sincronizados da base de Metas (Power BI) · Atualizado até {data_recente_fmt}_"
+                    )
+            except Exception as e_cat_meta:
+                logger.error(f"Erro ao calcular meta de {cat_nome}: {e_cat_meta}")
+
         clean_sql = f"SELECT '{desc_tempo}' AS periodo, categoria, SUM(fat_num) AS faturamento, SUM(qtd_vendas_num) AS vendas FROM fato_ml WHERE {where_tempo} AND categoria = '{cat_nome}' GROUP BY categoria"
 
     # CASO D: RANKING DE SUB OU CATEGORIAS
