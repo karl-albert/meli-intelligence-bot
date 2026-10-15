@@ -111,6 +111,7 @@ SYNC_SECRET = os.environ.get("SYNC_SECRET", "joca_sync_2026_karl")
 # ==============================================================================
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 PARQUET_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_MaisVendidos.parquet").replace("\\", "/")
+PARQUET_METAS_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_Metas.parquet").replace("\\", "/")
 B3_DB_PATH = os.path.join(BASE_DIR, "b3_database.duckdb").replace("\\", "/")
 DICIONARIO_FILE = os.path.join(BASE_DIR, "dicionario_dados_ml.json")
 
@@ -241,6 +242,30 @@ def recarregar_duckdb():
             frete_gratis 
         FROM '{PARQUET_FILE}'
     """)
+    # Tabela de Metas (2025 e 2026)
+    if os.path.exists(PARQUET_METAS_FILE):
+        con.execute("DROP TABLE IF EXISTS fato_metas")
+        con.execute(f"""
+            CREATE TABLE fato_metas AS 
+            SELECT 
+                data, 
+                ano, 
+                mes, 
+                ano_mes,
+                posicao_ranking,
+                categoria, 
+                subcategoria, 
+                titulo_produto, 
+                marca, 
+                TRY_CAST(qtd_vendas_estimadas_dia AS INT) as qtd_vendas_num, 
+                TRY_CAST(REPLACE(REPLACE(faturamento_estimado_dia, '.', ''), ',', '.') AS DOUBLE) as fat_num, 
+                TRY_CAST(REPLACE(REPLACE(preco_atual, '.', ''), ',', '.') AS DOUBLE) as preco_num, 
+                is_full, 
+                frete_gratis 
+            FROM '{PARQUET_METAS_FILE}'
+        """)
+        logger.info(f"[OK] Tabela fato_metas carregada com {con.execute('SELECT COUNT(*) FROM fato_metas').fetchone()[0]:,} registros.")
+
     data_recente = con.execute("SELECT MAX(data) FROM fato_ml").fetchone()[0]
     total_registros = con.execute("SELECT COUNT(*) FROM fato_ml").fetchone()[0]
     data_inicio = con.execute("SELECT MIN(data) FROM fato_ml").fetchone()[0]
@@ -259,6 +284,57 @@ def recarregar_duckdb():
     logger.info(f"[OK] Base DuckDB pronta: {total_registros:,} registros. Periodo: {data_inicio} ate {data_recente}. Disponibilizado em: {data_hora_disponibilizado}")
 
 recarregar_duckdb()
+
+
+def _iniciar_servicos_keep_alive_e_warmup():
+    """
+    1. Pré-aquece DuckDB e conexões no boot do container para eliminar cold-start interno.
+    2. Executa loop de auto-ping que mantém o Render acordado das 06:00 às 02:00 BRT,
+       e permite que o Render durma das 02:00 às 06:00 BRT economizando horas gratuitas.
+    """
+    def _worker():
+        time.sleep(5)
+        try:
+            logger.info("[WARMUP] Pré-aquecendo banco DuckDB e conexões...")
+            if 'con' in globals() and con is not None:
+                _ = con.execute("SELECT count(*) FROM fato_ml").fetchone()
+            if os.path.exists(B3_DB_PATH):
+                con_b3 = get_b3_db()
+                _ = con_b3.execute("SELECT count(*) FROM fato_b3_tickers").fetchone()
+                con_b3.close()
+            logger.info("[WARMUP] DuckDB aquecido com sucesso!")
+        except Exception as e_w:
+            logger.warning(f"[WARMUP] Aviso ao pré-aquecer: {e_w}")
+
+        url_publica = os.environ.get("RENDER_EXTERNAL_URL", "https://meli-intelligence-bot.onrender.com").rstrip("/") + "/ping"
+        logger.info(f"[KEEP-ALIVE] Thread iniciada visando {url_publica}")
+        while True:
+            try:
+                agora = datetime.now(BRT_TZ)
+                # Janela de sono: 02h às 06h BRT (4 horas/dia para economizar cota do Render)
+                if 2 <= agora.hour < 6:
+                    logger.info(f"[KEEP-ALIVE] Janela de sono (02h às 06h BRT). Joca pode dormir. Agora: {agora.strftime('%H:%M:%S')}")
+                    time.sleep(300)
+                    continue
+
+                # Horário operacional ativo (06h às 02h BRT): auto-ping a cada 10 min
+                try:
+                    r = requests.get(url_publica, timeout=10)
+                    logger.info(f"[KEEP-ALIVE] Auto-ping enviado para {url_publica} -> Status {r.status_code}")
+                except Exception as e_p:
+                    logger.warning(f"[KEEP-ALIVE] Aviso no auto-ping: {e_p}")
+
+                time.sleep(600)  # 10 minutos
+            except Exception as e_loop:
+                logger.error(f"[KEEP-ALIVE] Erro no loop keep-alive: {e_loop}")
+                time.sleep(60)
+
+    t = threading.Thread(target=_worker, daemon=True, name="JocaKeepAliveWarmup")
+    t.start()
+
+
+# Inicia thread de keep-alive e aquecimento automático
+_iniciar_servicos_keep_alive_e_warmup()
 
 
 # ==============================================================================
@@ -828,25 +904,25 @@ def processar_pergunta(texto_msg, user_name):
 
     if quer_ytda:
         if ano_alvo and ano_alvo != ano_recente:
-            # Período homólogo acumulado no ano anterior até o mesmo dia/mês
+            # Período homólogo móvel acumulado no ano anterior até o mesmo dia/mês (anda dia a dia com a base)
             data_corte_alvo = f"{ano_alvo}-{mes_recente:02d}-{dia_recente:02d}"
-            where_tempo = f"ano = {ano_alvo} AND data <= '{data_corte_alvo}'"
-            desc_tempo = f"YTDA {ano_alvo} (Homólogo até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
+            where_tempo = f"data >= '{ano_alvo}-01-01' AND data <= '{data_corte_alvo}'"
+            desc_tempo = f"YTDA {ano_alvo} (Homólogo de 01/01/{ano_alvo} até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
         else:
-            where_tempo = f"ano = {ano_recente} AND data <= '{data_recente}'"
-            desc_tempo = f"YTDA {ano_recente} (Acumulado no Ano até {data_recente_fmt})"
+            where_tempo = f"data >= '{ano_recente}-01-01' AND data <= '{data_recente}'"
+            desc_tempo = f"YTDA {ano_recente} (Acumulado de 01/01/{ano_recente} até {data_recente_fmt})"
     elif quer_mtd:
         if ano_alvo and ano_alvo != ano_recente:
             data_corte_alvo = f"{ano_alvo}-{mes_recente:02d}-{dia_recente:02d}"
-            where_tempo = f"ano = {ano_alvo} AND mes = {mes_recente} AND data <= '{data_corte_alvo}'"
-            desc_tempo = f"MTD {mes_recente:02d}/{ano_alvo} (Homólogo até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
+            where_tempo = f"data >= '{ano_alvo}-{mes_recente:02d}-01' AND data <= '{data_corte_alvo}'"
+            desc_tempo = f"MTD {mes_recente:02d}/{ano_alvo} (Homólogo de 01/{mes_recente:02d}/{ano_alvo} até {dia_recente:02d}/{mes_recente:02d}/{ano_alvo})"
         else:
             where_tempo = f"ano = {ano_recente} AND mes = {mes_recente} AND data <= '{data_recente}'"
             desc_tempo = f"MTD (Acumulado no Mês {mes_recente:02d}/{ano_recente} até {data_recente_fmt})"
     elif ano_alvo and ano_alvo != ano_recente:
         # Usuário pediu um ano anterior fechado sem falar YTDA (ex: "em 2025" ou "no ano de 2025")
         where_tempo = f"ano = {ano_alvo}"
-        desc_tempo = f"Ano Completo de {ano_alvo}"
+        desc_tempo = f"Ano Completo de {ano_alvo} (01/01/{ano_alvo} a 31/12/{ano_alvo})"
     elif quer_ontem:
         where_tempo = f"data = '{ontem_str}'"
         desc_tempo = f"Ontem ({ontem_str})"
@@ -1173,6 +1249,19 @@ def processar_pergunta(texto_msg, user_name):
             achou_sub = (k_sub, cat_pai, sub_nome)
             break
 
+    # Se não achou na lista fixa, busca dinâmica tolerante a singular/plural e pequenos erros (ex: 'carregadore')
+    if not achou_sub:
+        palavras_cand = re.findall(r'\b[a-z0-9áéíóúãõç]{4,}\b', t_lower)
+        stop_words = {'qual', 'como', 'para', 'onde', 'quando', 'faturamento', 'vendas', 'pedidos', 'valor', 'quanto', 'ytda', 'hoje', 'ontem', 'este', 'esse', 'aquele', 'pelo', 'pela', 'sobre'}
+        for p in palavras_cand:
+            if p in stop_words or p in [m.lower() for m in LISTA_MARCAS_TOP]:
+                continue
+            termo_busca = p[:6] if len(p) >= 6 else p
+            row_sub_dyn = con.execute(f"SELECT DISTINCT categoria, subcategoria FROM fato_ml WHERE subcategoria ILIKE '%{termo_busca}%' LIMIT 1").fetchone()
+            if row_sub_dyn:
+                achou_sub = (p, row_sub_dyn[0], row_sub_dyn[1])
+                break
+
     # Identificação de Categoria
     achou_cat = None
     for k_cat, cat_nome in MAPA_CATEGORIAS.items():
@@ -1279,8 +1368,8 @@ def processar_pergunta(texto_msg, user_name):
     elif any(w in t_lower for w in ['produto', 'anuncio', 'anúncio', 'item', 'mais vendido', 'mais vendid']):
         clean_sql = f"SELECT '{desc_tempo}' AS periodo, titulo_produto, marca, categoria, subcategoria, SUM(qtd_vendas_num) AS vendas, SUM(fat_num) AS faturamento FROM fato_ml WHERE {where_tempo} GROUP BY titulo_produto, marca, categoria, subcategoria ORDER BY faturamento DESC LIMIT 5"
 
-    # CASO F: TOTAL GERAL DO PERÍODO
-    elif any(w in t_lower for w in ['total', 'geral', 'faturamento', 'faturou', 'vendas', 'vendeu', 'resultado']):
+    # CASO F: TOTAL GERAL DO PERÍODO (BLINDADO: NUNCA roda se houver 'de X', 'da X', etc.)
+    elif any(w in t_lower for w in ['total geral', 'faturamento total', 'vendas totais', 'resultado total']) or (any(w in t_lower for w in ['total', 'geral', 'faturamento', 'vendas']) and not re.search(r'\b(?:de|da|do|dos|das)\s+[a-z0-9áéíóúãõç]{3,}', t_lower)):
         if not disse_subcategoria and not disse_categoria and not achou_sub and not achou_cat and not achou_marca:
             clean_sql = f"SELECT '{desc_tempo}' AS periodo, SUM(fat_num) AS faturamento_total, SUM(qtd_vendas_num) AS total_pedidos FROM fato_ml WHERE {where_tempo}"
 
@@ -1290,7 +1379,7 @@ def processar_pergunta(texto_msg, user_name):
     if not clean_sql:
         prompt_sql = f"""
 Você é o motor analítico SQL DuckDB do robô 'Joca Meli' (Mercado Livre Brasil).
-Tabela: 'fato_ml' | Período solicitado: {desc_tempo} (filtro: {where_tempo})
+Tabelas disponíveis: 'fato_ml' (Realizado) e 'fato_metas' (Metas 2025/2026) | Período solicitado: {desc_tempo} (filtro: {where_tempo})
 
 REGRAS TEMPORAIS ESTRITAS:
 - Período WHERE obrigatório: {where_tempo}
@@ -1354,6 +1443,21 @@ Formate uma resposta executiva impecável para o Telegram:
 # ==============================================================================
 # 7. ROTAS FLASK (ENDPOINTS DA APLICAÇÃO NO RENDER - DUAL BOT HUB)
 # ==============================================================================
+@app.route("/ping", methods=["GET"])
+@app.route("/health", methods=["GET"])
+def ping():
+    """Endpoint ultraleve de monitoramento, wake-up e keep-alive para evitar cold start."""
+    agora_brt = datetime.now(BRT_TZ)
+    janela_sono = (2 <= agora_brt.hour < 6)
+    return jsonify({
+        "status": "awake",
+        "service": "Joca Intelligence Hub",
+        "hora_brt": agora_brt.strftime("%Y-%m-%d %H:%M:%S"),
+        "modo": "sono_permitido" if janela_sono else "operacional_ativo",
+        "mensagem": "Joca acordado e pronto para responder instantaneamente!"
+    }), 200
+
+
 @app.route("/", methods=["GET"])
 def home():
     return f"""
@@ -1680,7 +1784,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.3.0 - Auditoria Dupla B3 (Acoes e Indices EUA)",
+        "versao": "3.4.0 - Inteligência Temporal Homóloga YTDA e Blindagem Meli",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "horario_disponibilizacao": horario_bot,

@@ -1,0 +1,24 @@
+name: Despertador e Keep-Alive Joca (Render Free Tier)
+
+on:
+  schedule:
+    # Ativo das 06:00 às 02:00 BRT (09:00 às 05:00 UTC).
+    # Desligado das 02:00 às 06:00 BRT (05:00 às 09:00 UTC) para economizar as 750h gratuitas do Render.
+    - cron: '*/10 0-4,9-23 * * *'
+  workflow_dispatch:
+
+jobs:
+  ping_joca:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Keep-Alive no Joca Intelligence Hub
+        run: |
+          echo "Disparando ping de despertar / keep-alive para Joca..."
+          RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" --max-time 120 "https://meli-intelligence-bot.onrender.com/ping")
+          echo "$RESPONSE"
+          STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS" | cut -d':' -f2)
+          if [ "$STATUS" -ge 200 ] && [ "$STATUS" -lt 400 ]; then
+            echo "Joca acordado e operando com sucesso! (Status: $STATUS)"
+          else
+            echo "Aviso: Resposta inesperada do Joca (Status: $STATUS)"
+          fi

@@ -461,5 +461,9 @@
     }
   ],
   "total_produtos_mapeados": 254,
-  "total_marcas_unicas": 136
+  "total_marcas_unicas": 136,
+  "tabelas_disponiveis": {
+    "fato_ml": "Tabela de Vendas Realizadas oficiais do Mercado Livre (01/01/2025 ate hoje)",
+    "fato_metas": "Tabela de Metas Planejadas para 2025 e 2026 completo (01/01/2025 ate 31/12/2026)"
+  }
 }
