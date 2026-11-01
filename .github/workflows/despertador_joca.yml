@@ -3,7 +3,7 @@ name: Despertador Keep-Alive Joca & Alerta Faturamento ML
 on:
   schedule:
     # 1. Keep-Alive do Joca a cada 10 min (06:00 às 02:00 BRT / 09:00 às 05:00 UTC)
-    - cron: '*/10 0-4,9-23 * * *'
+    - cron: '*/10 0-1,10-0 * * *'
     # 2. Alertas Oficiais de Faturamento ML (11:00 e 15:00 BRT -> 14:00 e 18:00 UTC)
     - cron: '0 14,18 * * *'
     # 3. Alerta Oficial de Faturamento ML (21:00 BRT -> 00:00 UTC)
