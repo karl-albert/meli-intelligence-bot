@@ -19,6 +19,7 @@ import io
 import re
 import threading
 import time
+import unicodedata
 from datetime import datetime, timedelta, timezone
 from flask import Flask, request, jsonify, send_file
 import google.generativeai as genai
@@ -114,6 +115,35 @@ PARQUET_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_MaisVendidos.parquet").
 PARQUET_METAS_FILE = os.path.join(BASE_DIR, "Fato_MercadoLivre_Metas.parquet").replace("\\", "/")
 B3_DB_PATH = os.path.join(BASE_DIR, "b3_database.duckdb").replace("\\", "/")
 DICIONARIO_FILE = os.path.join(BASE_DIR, "dicionario_dados_ml.json")
+
+# ------------------------------------------------------------------------------
+# PRINTS EXECUTIVOS DO PAINEL POWER BI (DIARIO, MTD, YTDA, DETALHADO)
+# ------------------------------------------------------------------------------
+PRINTS_DIR = os.path.join(BASE_DIR, "prints")
+os.makedirs(PRINTS_DIR, exist_ok=True)
+PRINTS_META_FILE = os.path.join(PRINTS_DIR, "prints_meta.json")
+PRINTS_CATALOGO = {
+    "diario": {
+        "arquivo": "print_diario.png",
+        "titulo": "Resumo Diário de Vendas (ML)",
+        "emoji": "📅",
+    },
+    "mtd": {
+        "arquivo": "print_mtd.png",
+        "titulo": "Resumo Acumulado do Mês — MTD (ML)",
+        "emoji": "📊",
+    },
+    "ytda": {
+        "arquivo": "print_ytda.png",
+        "titulo": "Resumo Acumulado do Ano — YTDA (ML)",
+        "emoji": "📈",
+    },
+    "detalhado": {
+        "arquivo": "print_detalhado.png",
+        "titulo": "Resultado Detalhado — Análise Hierárquica (ML)",
+        "emoji": "🔎",
+    },
+}
 
 DICIONARIO_DADOS = {}
 if os.path.exists(DICIONARIO_FILE):
@@ -462,6 +492,176 @@ def enviar_mensagem(chat_id, texto, base_url=None):
         return False
 
 
+def enviar_foto(chat_id, caminho_imagem, caption=None, base_url=None):
+    """Envia imagem PNG em alta resolução diretamente para o chat do Telegram."""
+    if not base_url:
+        base_url = BASE_URL_BQ
+    if not os.path.exists(caminho_imagem):
+        logger.error(f"Arquivo de imagem não encontrado: {caminho_imagem}")
+        return False
+    try:
+        try:
+            requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "upload_photo"}, timeout=5)
+        except Exception:
+            pass
+
+        url = f"{base_url}/sendPhoto"
+        data_payload = {"chat_id": chat_id}
+        if caption:
+            data_payload["caption"] = caption[:1024]
+            data_payload["parse_mode"] = "Markdown"
+
+        with open(caminho_imagem, "rb") as img_f:
+            res = requests.post(
+                url,
+                data=data_payload,
+                files={"photo": (os.path.basename(caminho_imagem), img_f, "image/png")},
+                timeout=40,
+            )
+        resp_json = res.json()
+        if not resp_json.get("ok") and caption:
+            data_payload.pop("parse_mode", None)
+            with open(caminho_imagem, "rb") as img_f:
+                res = requests.post(
+                    url,
+                    data=data_payload,
+                    files={"photo": (os.path.basename(caminho_imagem), img_f, "image/png")},
+                    timeout=40,
+                )
+            resp_json = res.json()
+        return bool(resp_json.get("ok"))
+    except Exception as e:
+        logger.error(f"Erro ao enviar foto para Telegram ({base_url}): {e}")
+        return False
+
+
+def _normalizar_texto_print(texto):
+    txt = unicodedata.normalize("NFKD", texto or "").encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"\s+", " ", txt.lower()).strip()
+
+
+def detectar_pedido_print(texto):
+    """
+    Detecta pedidos de prints dos 4 paineis executivos ML:
+      - diario     (ex: 'Joca me envia um print do Diario')
+      - mtd        (ex: 'Joca me envia um print de acumulado mes')
+      - ytda       (ex: 'Joca me envia um print do acumulado ano')
+      - detalhado  (ex: 'Joca me envia um Print do Detalhado')
+    Retorna lista de chaves ['diario', 'mtd', 'ytda', 'detalhado'], ['ajuda'], ou None.
+    """
+    t = _normalizar_texto_print(texto)
+    gatilhos_visual = [
+        "print", "prints", "imagem", "imagens", "foto", "fotos",
+        "screenshot", "screen", "captura", "tela do", "tela de",
+        "painel visual", "me envia o painel", "manda o painel",
+    ]
+    if not any(g in t for g in gatilhos_visual):
+        return None
+
+    # Pedido de todos os prints
+    if any(k in t for k in ["todos", "os 4", "os quatro", "os 3", "os tres", "completo", "todas as telas", "todos os paineis"]):
+        return ["diario", "mtd", "ytda", "detalhado"]
+
+    tipos = []
+
+    # 1. Diário
+    if any(k in t for k in ["diario", "do dia", "de hoje", "resumo dia", "hoje"]):
+        tipos.append("diario")
+
+    # 2. Acumulado Mês (MTD)
+    if any(k in t for k in [
+        "acumulado mes", "acumulado do mes", "acumulado no mes", "acumulado mensal",
+        "mtd", "mensal", "mes atual", "resumo mes", "resumo do mes", "do mes"
+    ]):
+        tipos.append("mtd")
+
+    # 3. Acumulado Ano (YTDA)
+    if any(k in t for k in [
+        "acumulado ano", "acumulado do ano", "acumulado no ano", "acumulado anual",
+        "ytda", "ytd", "anual", "ano atual", "resumo ano", "resumo do ano", "do ano"
+    ]):
+        tipos.append("ytda")
+
+    # 4. Resultado Detalhado (Análise Hierárquica)
+    if any(k in t for k in [
+        "detalhado", "detalhe", "hierarquico", "hierarquica", "hierarquia",
+        "analise hierarquica", "arvore"
+    ]):
+        tipos.append("detalhado")
+
+    if not tipos:
+        return ["ajuda"]
+    return tipos
+
+
+def _carregar_meta_prints():
+    if os.path.exists(PRINTS_META_FILE):
+        try:
+            with open(PRINTS_META_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return {}
+
+
+def processar_envio_prints(chat_id, tipos, user_name, base_url):
+    """Envia os prints solicitados e retorna o texto-resumo para telemetria/audio."""
+    if tipos == ["ajuda"]:
+        msg_ajuda = (
+            f"🖼️ *Olá {user_name}! Posso te enviar 4 prints atualizados do painel Mercado Livre:*\n\n"
+            f"• 📅 *Diário:* _\"Joca me envia um print do Diário\"_\n"
+            f"• 📊 *Acumulado Mês (MTD):* _\"Joca me envia um print de acumulado mês\"_\n"
+            f"• 📈 *Acumulado Ano (YTDA):* _\"Joca me envia um print do acumulado ano\"_\n"
+            f"• 🔎 *Resultado Detalhado:* _\"Joca me envia um print do Detalhado\"_\n\n"
+            f"💡 Você também pode pedir *\"print de todos\"* para receber os 4 de uma vez!"
+        )
+        enviar_mensagem(chat_id, msg_ajuda, base_url=base_url)
+        return msg_ajuda
+
+    meta = _carregar_meta_prints()
+    data_ref = meta.get("data_ref") or str(data_recente or "N/D")
+    atualizado_em = meta.get("atualizado_em") or ""
+    rodape_dt = f"🗓️ *Base até:* {data_ref}" + (f"  |  🕒 *Gerado:* {atualizado_em}" if atualizado_em else "")
+
+    enviados = []
+    faltando = []
+    for tipo in tipos:
+        info = PRINTS_CATALOGO.get(tipo)
+        if not info:
+            continue
+        img_path = os.path.join(PRINTS_DIR, info["arquivo"])
+        if not os.path.exists(img_path):
+            faltando.append(info["titulo"])
+            continue
+        caption = (
+            f"{info['emoji']} *{info['titulo']}*\n"
+            f"{rodape_dt}\n"
+            f"🤖 _Enviado sob demanda pelo Joca Assistente_"
+        )
+        ok = enviar_foto(chat_id, img_path, caption=caption, base_url=base_url)
+        if ok:
+            enviados.append(info["titulo"])
+        else:
+            faltando.append(info["titulo"])
+
+    if faltando and not enviados:
+        aviso = (
+            f"⚠️ *{user_name}, ainda não há print sincronizado para:* {', '.join(faltando)}.\n\n"
+            f"Execute o atualizador `Atualizar_Prints_Joca.bat` com o Power BI aberto para disponibilizar as imagens atualizadas na nuvem."
+        )
+        enviar_mensagem(chat_id, aviso, base_url=base_url)
+        return aviso
+
+    if faltando:
+        enviar_mensagem(
+            chat_id,
+            f"⚠️ Não encontrei imagem sincronizada para: {', '.join(faltando)}.",
+            base_url=base_url,
+        )
+
+    return f"Print(s) enviado(s) com sucesso ({data_ref}): {', '.join(enviados)}."
+
+
 async def _sintetizar_edge(texto):
     import edge_tts
     comm = edge_tts.Communicate(texto, "pt-BR-AntonioNeural")
@@ -595,6 +795,48 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
 
         t_inicio = time.time()
         requests.post(f"{base_url}/sendChatAction", json={"chat_id": chat_id, "action": "typing"}, timeout=5)
+
+        # ----------------------------------------------------------------------
+        # PEDIDOS DE PRINTS EXECUTIVOS DO PAINEL (DIARIO, MTD, YTDA, DETALHADO)
+        # ----------------------------------------------------------------------
+        tipos_print = detectar_pedido_print(texto)
+        if tipos_print:
+            resumo_print = processar_envio_prints(chat_id, tipos_print, user_name, base_url)
+            try:
+                t_duracao = round(time.time() - t_inicio, 2)
+                from_user = msg.get("from", {})
+                p_nome = from_user.get("first_name", "")
+                u_nome = from_user.get("last_name", "")
+                nome_completo = f"{p_nome} {u_nome}".strip() or user_name
+                username_val = from_user.get("username", "")
+                username_str = f"@{username_val}" if username_val else "-"
+                agora = datetime.now()
+                bot_tag = "Joca_BigQuery" if "BigQuery" in bot_label else "Joca_Fabric"
+                salvar_conversa({
+                    "id": msg.get("message_id") or int(time.time()),
+                    "data_hora": agora.strftime("%Y-%m-%d %H:%M:%S"),
+                    "data": agora.strftime("%Y-%m-%d"),
+                    "hora": agora.strftime("%H:%M:%S"),
+                    "bot": bot_tag,
+                    "chat_id": str(chat_id),
+                    "usuario": nome_completo,
+                    "username": username_str,
+                    "tipo_entrada": "Voz" if origem_audio else "Texto",
+                    "pergunta": texto,
+                    "resposta": resumo_print,
+                    "tempo_resposta_s": t_duracao,
+                    "status": "Sucesso (Print)"
+                })
+            except Exception as e_log_p:
+                logger.error(f"Erro ao registrar telemetria de print: {e_log_p}")
+
+            quer_audio = origem_audio or any(w in texto.lower() for w in ["áudio", "audio", "por voz", "fale", "mande áudio", "voz"])
+            if quer_audio and tipos_print != ["ajuda"]:
+                try:
+                    enviar_voz(chat_id, f"Pronto {user_name}, já te enviei o print atualizado aqui no chat.", base_url=base_url)
+                except Exception as e_vp:
+                    logger.error(f"Erro ao enviar voz pos-print: {e_vp}")
+            return
 
         # Separação Estrita de Responsabilidade: Telegram = Joca Mercado Livre (100% ML)
         t_lower = texto.lower()
@@ -3503,6 +3745,61 @@ def sync_data():
         except Exception as e:
             logger.error(f"Erro na sincronização: {e}")
             return jsonify({"status": "error", "message": str(e)}), 500
+
+
+@app.route("/sync_print", methods=["GET", "POST"])
+def sync_print():
+    """Recebe ou consulta os 4 prints PNG atualizados (diario, mtd, ytda, detalhado)."""
+    valid_secrets = {SYNC_SECRET, "joca_sync_2026_karl", "meli_joca_sync_2026_karl"}
+    req_secret = request.args.get("secret") or request.headers.get("X-Sync-Secret")
+    if req_secret not in valid_secrets:
+        return jsonify({"status": "error", "message": "Chave inválida."}), 403
+
+    if request.method == "GET":
+        meta = _carregar_meta_prints()
+        disponiveis = {}
+        for k, info in PRINTS_CATALOGO.items():
+            p = os.path.join(PRINTS_DIR, info["arquivo"])
+            disponiveis[k] = {
+                "existe": os.path.exists(p),
+                "bytes": os.path.getsize(p) if os.path.exists(p) else 0,
+            }
+        return jsonify({"status": "ready", "meta": meta, "prints": disponiveis}), 200
+
+    tipo = (request.args.get("tipo") or request.form.get("tipo") or "").strip().lower()
+    if tipo not in PRINTS_CATALOGO:
+        return jsonify({
+            "status": "error",
+            "message": f"Tipo inválido '{tipo}'. Use: {', '.join(PRINTS_CATALOGO.keys())}"
+        }), 400
+
+    if "file" not in request.files or request.files["file"].filename == "":
+        return jsonify({"status": "error", "message": "Nenhum arquivo PNG enviado."}), 400
+
+    try:
+        dest_path = os.path.join(PRINTS_DIR, PRINTS_CATALOGO[tipo]["arquivo"])
+        request.files["file"].save(dest_path)
+        size_b = os.path.getsize(dest_path)
+
+        meta = _carregar_meta_prints()
+        data_ref = (request.args.get("data_ref") or request.form.get("data_ref") or "").strip()
+        if data_ref:
+            meta["data_ref"] = data_ref
+        meta["atualizado_em"] = datetime.now(BRT_TZ).strftime("%d/%m/%Y %H:%M")
+        meta.setdefault("arquivos", {})[tipo] = PRINTS_CATALOGO[tipo]["arquivo"]
+        with open(PRINTS_META_FILE, "w", encoding="utf-8") as fm:
+            json.dump(meta, fm, ensure_ascii=False, indent=2)
+
+        logger.info(f"✅ [SYNC PRINT] Print '{tipo}' atualizado com sucesso ({size_b:,} bytes).")
+        return jsonify({
+            "status": "success",
+            "tipo": tipo,
+            "bytes": size_b,
+            "meta": meta,
+        }), 200
+    except Exception as e:
+        logger.error(f"Erro ao salvar print '{tipo}': {e}")
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 
 @app.route("/download_b3_duckdb", methods=["GET"])
