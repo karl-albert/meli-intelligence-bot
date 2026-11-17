@@ -2222,7 +2222,7 @@ def status():
 
     return jsonify({
         "status": "online",
-        "versao": "3.4.0 - Inteligência Temporal Homóloga YTDA e Blindagem Meli",
+        "versao": "3.5.0 - Prints Executivos Light HD Sob Demanda (Diário, MTD, YTDA, Detalhado)",
         "total_registros": total_registros,
         "data_recente": str(data_recente),
         "horario_disponibilizacao": horario_bot,
