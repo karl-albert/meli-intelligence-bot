@@ -620,8 +620,6 @@ def processar_envio_prints(chat_id, tipos, user_name, base_url):
 
     meta = _carregar_meta_prints()
     data_ref = meta.get("data_ref") or str(data_recente or "N/D")
-    atualizado_em = meta.get("atualizado_em") or ""
-    rodape_dt = f"🗓️ *Base até:* {data_ref}" + (f"  |  🕒 *Gerado:* {atualizado_em}" if atualizado_em else "")
 
     enviados = []
     faltando = []
@@ -633,12 +631,7 @@ def processar_envio_prints(chat_id, tipos, user_name, base_url):
         if not os.path.exists(img_path):
             faltando.append(info["titulo"])
             continue
-        caption = (
-            f"{info['emoji']} *{info['titulo']}*\n"
-            f"{rodape_dt}\n"
-            f"🤖 _Enviado sob demanda pelo Joca Assistente_"
-        )
-        ok = enviar_foto(chat_id, img_path, caption=caption, base_url=base_url)
+        ok = enviar_foto(chat_id, img_path, caption=None, base_url=base_url)
         if ok:
             enviados.append(info["titulo"])
         else:
@@ -830,12 +823,6 @@ def _processar_mensagem_telegram(msg, base_url, bot_label="Joca Assistente"):
             except Exception as e_log_p:
                 logger.error(f"Erro ao registrar telemetria de print: {e_log_p}")
 
-            quer_audio = origem_audio or any(w in texto.lower() for w in ["áudio", "audio", "por voz", "fale", "mande áudio", "voz"])
-            if quer_audio and tipos_print != ["ajuda"]:
-                try:
-                    enviar_voz(chat_id, f"Pronto {user_name}, já te enviei o print atualizado aqui no chat.", base_url=base_url)
-                except Exception as e_vp:
-                    logger.error(f"Erro ao enviar voz pos-print: {e_vp}")
             return
 
         # Separação Estrita de Responsabilidade: Telegram = Joca Mercado Livre (100% ML)
