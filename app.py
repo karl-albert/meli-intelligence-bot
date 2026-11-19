@@ -124,7 +124,7 @@ os.makedirs(PRINTS_DIR, exist_ok=True)
 PRINTS_META_FILE = os.path.join(PRINTS_DIR, "prints_meta.json")
 
 REGIOES_INFO = {
-    "todas": {"nome": "Consolidado Brasil", "flag": "🇧🇷"},
+    "todas": {"nome": "Brasil (Sem Filtros)", "flag": "🇧🇷"},
     "sudeste": {"nome": "Regional Sudeste", "flag": "📍"},
     "sul": {"nome": "Regional Sul", "flag": "📍"},
     "nordeste": {"nome": "Regional Nordeste", "flag": "📍"},
@@ -582,7 +582,7 @@ def detectar_pedido_print(texto):
     """
     Detecta pedidos de prints dos 4 painéis executivos ML nas 6 regionais (24 telas):
       Painéis: diário, mtd, ytda, detalhado
-      Regionais: todas (padrão / consolidado Brasil), sudeste, sul, nordeste, centro_oeste, norte
+      Regionais: todas (padrão / consolidado Brasil / sem filtros), sudeste, sul, nordeste, centro_oeste, norte
     """
     t = _normalizar_texto_print(texto)
     gatilhos_visual = [
@@ -605,11 +605,14 @@ def detectar_pedido_print(texto):
         regiao = "nordeste"
     elif re.search(r"\bnorte\b", t):
         regiao = "norte"
-    elif re.search(r"\b(brasil|nacional|todas as regioes|todas regioes|consolidado)\b", t):
+    elif re.search(r"\b(brasil|nacional|todas as regioes|todas regioes|consolidado|sem filtros?|geral)\b", t):
         regiao = "todas"
 
-    # Detectar se pediu explicitamente todas as regionais
-    todas_regionais = bool(re.search(r"\b(todas as regionais|todas regionais|todas as 6|todas 6|24 prints)\b", t))
+    # Detectar se pediu explicitamente todas as regionais (todas as 6 regionais)
+    todas_regionais = bool(re.search(
+        r"\b(todas as regionais|de todas as regionais|todas regionais|todas as regioes|de todas as regioes|todas regioes|todas as 6|todas 6|24 prints|todos os 24)\b",
+        t
+    ))
 
     # Detectar painéis solicitados
     paineis = []
@@ -624,9 +627,10 @@ def detectar_pedido_print(texto):
 
     quer_todos_paineis = any(k in t for k in [
         "todos os prints", "todas as telas", "todos os paineis", "os 4", "os quatro",
-        "os 3", "os tres", "completo", "todos"
+        "os 3", "os tres", "completo", "todos", "prints de todos", "telas"
     ])
 
+    # Se pediu "prints do sul" ou "telas do sul", nenhum painel específico foi citado, mas citou regional
     if quer_todos_paineis or (not paineis and regiao is not None) or (not paineis and todas_regionais):
         paineis = ["diario", "mtd", "ytda", "detalhado"]
 
@@ -666,16 +670,21 @@ def processar_envio_prints(chat_id, tipos, user_name, base_url):
     """Envia os prints solicitados e retorna o texto-resumo para telemetria/áudio."""
     if tipos == ["ajuda"]:
         msg_ajuda = (
-            f"🖼️ *Olá {user_name}! Posso te enviar 24 prints atualizados do painel Mercado Livre (4 visões x 6 regionais):*\n\n"
-            f"• 📅 *Diário:* _\"print diário\"_ ou _\"print diário sul\"_\n"
-            f"• 📊 *Acumulado Mês (MTD):* _\"print mtd\"_ ou _\"print mtd sudeste\"_\n"
-            f"• 📈 *Acumulado Ano (YTDA):* _\"print ytda\"_ ou _\"print ytda nordeste\"_\n"
-            f"• 🔎 *Resultado Detalhado:* _\"print detalhado centro-oeste\"_\n\n"
-            f"🌎 *Regionais disponíveis:* Brasil (Consolidado), Sudeste, Sul, Nordeste, Centro-Oeste, Norte.\n"
-            f"💡 *Dicas:*\n"
-            f"  - _\"prints sul\"_ envia os 4 painéis da região Sul\n"
-            f"  - _\"todos os prints\"_ envia os 4 painéis consolidados Brasil\n"
-            f"  - _\"todas as regionais\"_ envia os 24 prints completos"
+            f"🖼️ *Exemplos de Comandos de Prints (Mercado Livre):*\n\n"
+            f"• 📅 *Diário da Regional (Filtrado):*\n"
+            f"  _\"Joca me manda o print diário da regional sul\"_ ou _\"print diário sul\"_\n\n"
+            f"• 📊 *Acumulado Mês (MTD):*\n"
+            f"  _\"print mtd sudeste\"_\n\n"
+            f"• 📈 *Acumulado Ano (YTDA):*\n"
+            f"  _\"print ytda nordeste\"_\n\n"
+            f"• 🔎 *Resultado Detalhado (Hierárquico):*\n"
+            f"  _\"print detalhado centro-oeste\"_\n\n"
+            f"• 🗺️ *4 Painéis da Regional:*\n"
+            f"  _\"prints do sul\"_ ou _\"telas do sul\"_\n\n"
+            f"• 🇧🇷 *Consolidado Brasil (Sem Filtros):*\n"
+            f"  _\"Joca me manda o print diário Brasil\"_ ou _\"print diário\"_ ou _\"todos os prints\"_\n\n"
+            f"• 🌐 *Todas as Regionais (24 Prints):*\n"
+            f"  _\"print de todas as regionais\"_\n"
         )
         enviar_mensagem(chat_id, msg_ajuda, base_url=base_url)
         return msg_ajuda
