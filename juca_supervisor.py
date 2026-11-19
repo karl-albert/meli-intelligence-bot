@@ -87,9 +87,9 @@ PIPELINES = [
         "tag": "ML Fabric",
         "repo": "karl-albert/Atualizador_Fabric_MercadoLivre",
         "wf": "rotina_atualizador_fabric.yml",
-        "cron_desc": "Diariamente às 08h15, 18h15 e 23h15 (BRT)",
+        "cron_desc": "Diariamente às 09h30, 12h30, 17h30 e 23h30 (BRT)",
         "tolerance_min": 35,
-        "times": [(8, 15), (18, 15), (23, 15)],
+        "times": [(9, 30), (12, 30), (17, 30), (23, 30)],
         "weekdays": [0, 1, 2, 3, 4, 5, 6]
     },
     {

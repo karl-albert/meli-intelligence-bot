@@ -117,33 +117,71 @@ B3_DB_PATH = os.path.join(BASE_DIR, "b3_database.duckdb").replace("\\", "/")
 DICIONARIO_FILE = os.path.join(BASE_DIR, "dicionario_dados_ml.json")
 
 # ------------------------------------------------------------------------------
-# PRINTS EXECUTIVOS DO PAINEL POWER BI (DIARIO, MTD, YTDA, DETALHADO)
+# PRINTS EXECUTIVOS DO PAINEL POWER BI (24 COMBINAÇÕES: 4 PAINÉIS x 6 REGIONAIS)
 # ------------------------------------------------------------------------------
 PRINTS_DIR = os.path.join(BASE_DIR, "prints")
 os.makedirs(PRINTS_DIR, exist_ok=True)
 PRINTS_META_FILE = os.path.join(PRINTS_DIR, "prints_meta.json")
-PRINTS_CATALOGO = {
+
+REGIOES_INFO = {
+    "todas": {"nome": "Consolidado Brasil", "flag": "🇧🇷"},
+    "sudeste": {"nome": "Regional Sudeste", "flag": "📍"},
+    "sul": {"nome": "Regional Sul", "flag": "📍"},
+    "nordeste": {"nome": "Regional Nordeste", "flag": "📍"},
+    "centro_oeste": {"nome": "Regional Centro-Oeste", "flag": "📍"},
+    "norte": {"nome": "Regional Norte", "flag": "📍"},
+}
+
+PAINEIS_INFO = {
+    "diario": {"titulo": "Resumo Diário de Vendas", "emoji": "📅"},
+    "mtd": {"titulo": "Resumo Acumulado do Mês (MTD)", "emoji": "📊"},
+    "ytda": {"titulo": "Resumo Acumulado do Ano (YTDA)", "emoji": "📈"},
+    "detalhado": {"titulo": "Resultado Detalhado — Análise Hierárquica", "emoji": "🔎"},
+}
+
+PRINTS_CATALOGO = {}
+for reg_k, reg_meta in REGIOES_INFO.items():
+    for pan_k, pan_meta in PAINEIS_INFO.items():
+        chave = f"{pan_k}_{reg_k}"
+        PRINTS_CATALOGO[chave] = {
+            "arquivo": f"print_{pan_k}_{reg_k}.png",
+            "titulo": f"{pan_meta['titulo']} ({reg_meta['nome']})",
+            "emoji": pan_meta["emoji"],
+            "painel": pan_k,
+            "regiao": reg_k,
+        }
+
+# Aliases de compatibilidade (apontam para o consolidado Brasil)
+PRINTS_CATALOGO.update({
     "diario": {
         "arquivo": "print_diario.png",
-        "titulo": "Resumo Diário de Vendas (ML)",
+        "titulo": "Resumo Diário de Vendas (Consolidado Brasil)",
         "emoji": "📅",
+        "painel": "diario",
+        "regiao": "todas",
     },
     "mtd": {
         "arquivo": "print_mtd.png",
-        "titulo": "Resumo Acumulado do Mês — MTD (ML)",
+        "titulo": "Resumo Acumulado do Mês — MTD (Consolidado Brasil)",
         "emoji": "📊",
+        "painel": "mtd",
+        "regiao": "todas",
     },
     "ytda": {
         "arquivo": "print_ytda.png",
-        "titulo": "Resumo Acumulado do Ano — YTDA (ML)",
+        "titulo": "Resumo Acumulado do Ano — YTDA (Consolidado Brasil)",
         "emoji": "📈",
+        "painel": "ytda",
+        "regiao": "todas",
     },
     "detalhado": {
         "arquivo": "print_detalhado.png",
-        "titulo": "Resultado Detalhado — Análise Hierárquica (ML)",
+        "titulo": "Resultado Detalhado — Análise Hierárquica (Consolidado Brasil)",
         "emoji": "🔎",
+        "painel": "detalhado",
+        "regiao": "todas",
     },
-}
+})
 
 DICIONARIO_DADOS = {}
 if os.path.exists(DICIONARIO_FILE):
@@ -542,56 +580,76 @@ def _normalizar_texto_print(texto):
 
 def detectar_pedido_print(texto):
     """
-    Detecta pedidos de prints dos 4 paineis executivos ML:
-      - diario     (ex: 'Joca me envia um print do Diario')
-      - mtd        (ex: 'Joca me envia um print de acumulado mes')
-      - ytda       (ex: 'Joca me envia um print do acumulado ano')
-      - detalhado  (ex: 'Joca me envia um Print do Detalhado')
-    Retorna lista de chaves ['diario', 'mtd', 'ytda', 'detalhado'], ['ajuda'], ou None.
+    Detecta pedidos de prints dos 4 painéis executivos ML nas 6 regionais (24 telas):
+      Painéis: diário, mtd, ytda, detalhado
+      Regionais: todas (padrão / consolidado Brasil), sudeste, sul, nordeste, centro_oeste, norte
     """
     t = _normalizar_texto_print(texto)
     gatilhos_visual = [
         "print", "prints", "imagem", "imagens", "foto", "fotos",
-        "screenshot", "screen", "captura", "tela do", "tela de",
-        "painel visual", "me envia o painel", "manda o painel",
+        "screenshot", "screen", "captura", "tela do", "tela de", "telas",
+        "painel visual", "me envia o painel", "manda o painel", "painel",
     ]
     if not any(g in t for g in gatilhos_visual):
         return None
 
-    # Pedido de todos os prints
-    if any(k in t for k in ["todos", "os 4", "os quatro", "os 3", "os tres", "completo", "todas as telas", "todos os paineis"]):
-        return ["diario", "mtd", "ytda", "detalhado"]
+    # Detectar regional solicitada
+    regiao = None
+    if re.search(r"\b(centro[- ]?oeste|centroeste|co)\b", t):
+        regiao = "centro_oeste"
+    elif re.search(r"\bsudeste\b", t):
+        regiao = "sudeste"
+    elif re.search(r"\bsul\b", t):
+        regiao = "sul"
+    elif re.search(r"\bnordeste\b", t):
+        regiao = "nordeste"
+    elif re.search(r"\bnorte\b", t):
+        regiao = "norte"
+    elif re.search(r"\b(brasil|nacional|todas as regioes|todas regioes|consolidado)\b", t):
+        regiao = "todas"
 
-    tipos = []
+    # Detectar se pediu explicitamente todas as regionais
+    todas_regionais = bool(re.search(r"\b(todas as regionais|todas regionais|todas as 6|todas 6|24 prints)\b", t))
 
-    # 1. Diário
-    if any(k in t for k in ["diario", "do dia", "de hoje", "resumo dia", "hoje"]):
-        tipos.append("diario")
+    # Detectar painéis solicitados
+    paineis = []
+    if re.search(r"\b(diario|do dia|de hoje|resumo dia|hoje)\b", t):
+        paineis.append("diario")
+    if re.search(r"\b(mtd|acumulado (do )?mes|acumulado no mes|acumulado mensal|mensal|mes atual|resumo (do )?mes|do mes)\b", t):
+        paineis.append("mtd")
+    if re.search(r"\b(ytda?|ytd|acumulado (do )?ano|acumulado no ano|acumulado anual|anual|ano atual|resumo (do )?ano|do ano)\b", t):
+        paineis.append("ytda")
+    if re.search(r"\b(detalhado|detalhe|hierarquic[oa]|hierarquia|analise hierarquica|arvore)\b", t):
+        paineis.append("detalhado")
 
-    # 2. Acumulado Mês (MTD)
-    if any(k in t for k in [
-        "acumulado mes", "acumulado do mes", "acumulado no mes", "acumulado mensal",
-        "mtd", "mensal", "mes atual", "resumo mes", "resumo do mes", "do mes"
-    ]):
-        tipos.append("mtd")
+    quer_todos_paineis = any(k in t for k in [
+        "todos os prints", "todas as telas", "todos os paineis", "os 4", "os quatro",
+        "os 3", "os tres", "completo", "todos"
+    ])
 
-    # 3. Acumulado Ano (YTDA)
-    if any(k in t for k in [
-        "acumulado ano", "acumulado do ano", "acumulado no ano", "acumulado anual",
-        "ytda", "ytd", "anual", "ano atual", "resumo ano", "resumo do ano", "do ano"
-    ]):
-        tipos.append("ytda")
+    if quer_todos_paineis or (not paineis and regiao is not None) or (not paineis and todas_regionais):
+        paineis = ["diario", "mtd", "ytda", "detalhado"]
 
-    # 4. Resultado Detalhado (Análise Hierárquica)
-    if any(k in t for k in [
-        "detalhado", "detalhe", "hierarquico", "hierarquica", "hierarquia",
-        "analise hierarquica", "arvore"
-    ]):
-        tipos.append("detalhado")
+    # Se ainda não tem painel nem regional identificada (apenas gatilho vago como "print")
+    if not paineis and not regiao and not todas_regionais:
+        palavras_curtas = {"print", "prints", "me manda um print", "me envia prints", "me manda os prints"}
+        if any(t == p or t.startswith(p + " ") or t.endswith(" " + p) for p in palavras_curtas):
+            paineis = ["diario", "mtd", "ytda", "detalhado"]
+            regiao = "todas"
+        else:
+            return ["ajuda"]
 
-    if not tipos:
-        return ["ajuda"]
-    return tipos
+    if todas_regionais:
+        chaves = []
+        for rk in ["todas", "sudeste", "sul", "nordeste", "centro_oeste", "norte"]:
+            for pk in paineis:
+                chaves.append(f"{pk}_{rk}")
+        return chaves
+
+    if not regiao:
+        regiao = "todas"
+
+    return [f"{pk}_{regiao}" for pk in paineis]
 
 
 def _carregar_meta_prints():
@@ -605,15 +663,19 @@ def _carregar_meta_prints():
 
 
 def processar_envio_prints(chat_id, tipos, user_name, base_url):
-    """Envia os prints solicitados e retorna o texto-resumo para telemetria/audio."""
+    """Envia os prints solicitados e retorna o texto-resumo para telemetria/áudio."""
     if tipos == ["ajuda"]:
         msg_ajuda = (
-            f"🖼️ *Olá {user_name}! Posso te enviar 4 prints atualizados do painel Mercado Livre:*\n\n"
-            f"• 📅 *Diário:* _\"Joca me envia um print do Diário\"_\n"
-            f"• 📊 *Acumulado Mês (MTD):* _\"Joca me envia um print de acumulado mês\"_\n"
-            f"• 📈 *Acumulado Ano (YTDA):* _\"Joca me envia um print do acumulado ano\"_\n"
-            f"• 🔎 *Resultado Detalhado:* _\"Joca me envia um print do Detalhado\"_\n\n"
-            f"💡 Você também pode pedir *\"print de todos\"* para receber os 4 de uma vez!"
+            f"🖼️ *Olá {user_name}! Posso te enviar 24 prints atualizados do painel Mercado Livre (4 visões x 6 regionais):*\n\n"
+            f"• 📅 *Diário:* _\"print diário\"_ ou _\"print diário sul\"_\n"
+            f"• 📊 *Acumulado Mês (MTD):* _\"print mtd\"_ ou _\"print mtd sudeste\"_\n"
+            f"• 📈 *Acumulado Ano (YTDA):* _\"print ytda\"_ ou _\"print ytda nordeste\"_\n"
+            f"• 🔎 *Resultado Detalhado:* _\"print detalhado centro-oeste\"_\n\n"
+            f"🌎 *Regionais disponíveis:* Brasil (Consolidado), Sudeste, Sul, Nordeste, Centro-Oeste, Norte.\n"
+            f"💡 *Dicas:*\n"
+            f"  - _\"prints sul\"_ envia os 4 painéis da região Sul\n"
+            f"  - _\"todos os prints\"_ envia os 4 painéis consolidados Brasil\n"
+            f"  - _\"todas as regionais\"_ envia os 24 prints completos"
         )
         enviar_mensagem(chat_id, msg_ajuda, base_url=base_url)
         return msg_ajuda
@@ -631,7 +693,8 @@ def processar_envio_prints(chat_id, tipos, user_name, base_url):
         if not os.path.exists(img_path):
             faltando.append(info["titulo"])
             continue
-        ok = enviar_foto(chat_id, img_path, caption=None, base_url=base_url)
+        legenda = f"{info['emoji']} {info['titulo']} (Ref: {data_ref})"
+        ok = enviar_foto(chat_id, img_path, caption=legenda, base_url=base_url)
         if ok:
             enviados.append(info["titulo"])
         else:
