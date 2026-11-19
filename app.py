@@ -702,8 +702,7 @@ def processar_envio_prints(chat_id, tipos, user_name, base_url):
         if not os.path.exists(img_path):
             faltando.append(info["titulo"])
             continue
-        legenda = f"{info['emoji']} {info['titulo']} (Ref: {data_ref})"
-        ok = enviar_foto(chat_id, img_path, caption=legenda, base_url=base_url)
+        ok = enviar_foto(chat_id, img_path, caption=None, base_url=base_url)
         if ok:
             enviados.append(info["titulo"])
         else:
