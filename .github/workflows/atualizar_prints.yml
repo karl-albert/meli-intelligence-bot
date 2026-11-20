@@ -1,0 +1,69 @@
+name: Atualizar Prints Executivos ML (Nuvem 24/7)
+
+on:
+  schedule:
+    # 08h30 Horário de Brasília (BRT / UTC-3) -> 11h30 UTC (Abertura Comercial)
+    - cron: '30 11 * * *'
+    # 14h00 Horário de Brasília (BRT / UTC-3) -> 17h00 UTC (Check Intermediário)
+    - cron: '0 17 * * *'
+    # 18h30 Horário de Brasília (BRT / UTC-3) -> 21h30 UTC (Pico da Tarde)
+    - cron: '30 21 * * *'
+    # 23h45 Horário de Brasília (BRT / UTC-3) -> 02h45 UTC (Fechamento do Dia)
+    - cron: '45 2 * * *'
+  workflow_dispatch: # Permite disparo manual imediato pelo GitHub a qualquer momento
+
+jobs:
+  gerar-prints:
+    name: Gerar e Sincronizar 24 Prints Executivos (Nuvem)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Clonar Repositório
+        uses: actions/checkout@v4
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Instalar Dependências do Sistema & Navegador Chromium
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser fonts-liberation fonts-dejavu-core
+
+      - name: Instalar Dependências Python & Node
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests pillow
+          npm install vega
+
+      - name: Executar Gerador Autônomo de Prints
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          WORKSPACE_ID: "0c2a1a5e-4519-4e4e-b3e6-14288c11291d"
+          DATASET_ID_MELI: ${{ secrets.DATASET_ID_MELI }}
+          RENDER_BOT_URL: "https://meli-intelligence-bot.onrender.com"
+          SYNC_SECRET: "meli_joca_sync_2026_karl"
+        run: |
+          python gerar_prints_cloud.py
+
+      - name: Commit e Push dos Prints Atualizados
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add prints/
+          if git diff --staged --quiet; then
+            echo "Nenhuma alteração nos prints."
+          else
+            git commit -m "chore(prints): atualizar 24 prints executivos via GitHub Actions Cloud"
+            git push
+          fi
