@@ -18,6 +18,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
+    permissions:
+      contents: write
+
     steps:
       - name: Clonar Repositório
         uses: actions/checkout@v4
@@ -54,6 +57,7 @@ jobs:
           python gerar_prints_cloud.py
 
       - name: Commit e Push dos Prints Atualizados
+        continue-on-error: true
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
