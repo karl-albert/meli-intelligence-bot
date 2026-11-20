@@ -42,7 +42,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install requests pillow
-          npm install vega
+          npm install vega@5
 
       - name: Executar Gerador Autônomo de Prints
         env:
