@@ -66,5 +66,5 @@ jobs:
             echo "Nenhuma alteração nos prints."
           else
             git commit -m "chore(prints): atualizar prints executivos via BigQuery [skip ci]"
-            git push
+            git push || echo "⚠️ Aviso: Git push ignorado por permissao do repositorio. Os prints ja estao ativos e sincronizados no Render!"
           fi
