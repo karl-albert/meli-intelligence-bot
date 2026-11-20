@@ -1,4 +1,4 @@
-name: Atualizar Prints Executivos ML (Nuvem 24/7)
+name: Atualizar Prints Executivos ML (BigQuery Nuvem 24/7)
 
 on:
   schedule:
@@ -14,7 +14,7 @@ on:
 
 jobs:
   gerar-prints:
-    name: Gerar e Sincronizar 24 Prints Executivos (Nuvem)
+    name: Gerar e Sincronizar Prints Executivos (BigQuery)
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -41,18 +41,15 @@ jobs:
       - name: Instalar Dependências Python & Node
         run: |
           python -m pip install --upgrade pip
-          pip install requests pillow
+          pip install requests pillow google-cloud-bigquery db-dtypes
           npm install vega@5
 
-      - name: Executar Gerador Autônomo de Prints
+      - name: Executar Gerador Autônomo de Prints (BigQuery)
         env:
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          WORKSPACE_ID: "0c2a1a5e-4519-4e4e-b3e6-14288c11291d"
-          DATASET_ID_MELI: ${{ secrets.DATASET_ID_MELI }}
-          RENDER_BOT_URL: "https://meli-intelligence-bot.onrender.com"
-          SYNC_SECRET: "meli_joca_sync_2026_karl"
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID || 'mercado-livre-mais-vendidos' }}
+          RENDER_BOT_URL: ${{ secrets.RENDER_BOT_URL || 'https://meli-intelligence-bot.onrender.com' }}
+          SYNC_SECRET: ${{ secrets.SYNC_SECRET || 'meli_joca_sync_2026_karl' }}
         run: |
           python gerar_prints_cloud.py
 
@@ -60,10 +57,10 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add prints/
+          git add prints/ payload_*.json
           if git diff --staged --quiet; then
             echo "Nenhuma alteração nos prints."
           else
-            git commit -m "chore(prints): atualizar 24 prints executivos via GitHub Actions Cloud"
+            git commit -m "chore(prints): atualizar prints executivos via BigQuery [skip ci]"
             git push
           fi

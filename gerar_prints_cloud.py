@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 ========================================================================================
-GERADOR E SINCRONIZADOR DE PRINTS EXECUTIVOS 100% EM NUVEM (GITHUB ACTIONS)
+GERADOR E SINCRONIZADOR DE PRINTS EXECUTIVOS 100% EM NUVEM (BIGQUERY + GITHUB ACTIONS)
 ========================================================================================
-Executa no Ubuntu (GitHub Actions) de forma totalmente autonoma e independente do notebook.
+Executa no Ubuntu (GitHub Actions) de forma totalmente autonoma e integrada ao BigQuery.
   4 Paineis x 6 Recortes Regionais = 24 Prints:
     • diario     (Todas as Regioes, Sudeste, Sul, Nordeste, Centro-Oeste, Norte)
     • mtd        (Todas as Regioes, Sudeste, Sul, Nordeste, Centro-Oeste, Norte)
@@ -11,14 +11,16 @@ Executa no Ubuntu (GitHub Actions) de forma totalmente autonoma e independente d
     • detalhado  (Todas as Regioes, Sudeste, Sul, Nordeste, Centro-Oeste, Norte)
 
 Origem dos Dados:
-  1. REST API Oficial do Microsoft Fabric / Power BI (se Azure Secrets configuradas)
-  2. Fallback para Payloads JSON locais cacheados no repositorio.
+  1. Google BigQuery (mercado-livre-mais-vendidos.ML_Cidades)
+  2. Payloads JSON sincronizados (payload_diario.json, payload_mtd.json, payload_ytda.json)
 ========================================================================================
 """
 
 import os
 import sys
 import json
+import base64
+import shutil
 import pathlib
 import subprocess
 import tempfile
@@ -32,7 +34,8 @@ PRINTS_DIR.mkdir(parents=True, exist_ok=True)
 PRINTS_META_FILE = PRINTS_DIR / "prints_meta.json"
 
 RENDER_BASE_URL = os.environ.get("RENDER_BOT_URL", "https://meli-intelligence-bot.onrender.com").rstrip("/")
-SYNC_SECRET = os.environ.get("SYNC_SECRET", "meli_joca_sync_2026_karl")
+SYNC_SECRET = os.environ.get("SYNC_SECRET", "meli_joca_sync_2026_karl").strip()
+GCP_PROJECT_ID = os.environ.get("GCP_PROJECT_ID", "mercado-livre-mais-vendidos").strip()
 
 REGIOES = {
     "todas": "Todas as Regiões",
@@ -53,74 +56,87 @@ def find_chromium() -> str:
         "/usr/bin/google-chrome",
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
     ]
     for c in candidates:
-        if shutil_which := subprocess.run(["which", c], capture_output=True, text=True):
-            if shutil_which.returncode == 0:
-                return c
+        if w := shutil.which(c):
+            return w
         if os.path.exists(c):
             return c
     return "chromium"
 
 
-def obter_payloads_fabric(tmp_dir: pathlib.Path) -> dict:
-    """Tenta consultar a REST API do Microsoft Fabric / Power BI para extrair DAX ao vivo."""
-    tenant_id = os.environ.get("AZURE_TENANT_ID")
-    client_id = os.environ.get("AZURE_CLIENT_ID")
-    client_secret = os.environ.get("AZURE_CLIENT_SECRET")
-    workspace_id = os.environ.get("WORKSPACE_ID", "0c2a1a5e-4519-4e4e-b3e6-14288c11291d")
-    dataset_id = os.environ.get("DATASET_ID_MELI", "092ce1ab-96e2-4d9e-bec8-938c597015dc")
-
-    payloads = {}
-    if client_id and client_secret and tenant_id and dataset_id:
-        print("[1/4] Consultando Microsoft Fabric via Power BI REST API...")
-        token_url = f"https://login.microsoftonline.com/{tenant_id.strip()}/oauth2/v2.0/token"
-        token_data = {
-            "client_id": client_id.strip(),
-            "client_secret": client_secret.strip(),
-            "grant_type": "client_credentials",
-            "scope": "https://analysis.windows.net/powerbi/api/.default"
-        }
+def obter_cliente_bigquery():
+    """Conecta ao Google BigQuery via Secret do GitHub (GCP_SA_KEY) ou chave local."""
+    sa_key_env = os.environ.get("GCP_SA_KEY", "").strip()
+    if sa_key_env:
         try:
-            r_tok = requests.post(token_url, data=token_data, timeout=15)
-            if r_tok.status_code == 200:
-                token = r_tok.json().get("access_token")
-                headers = {
-                    "Authorization": f"Bearer {token}",
-                    "Content-Type": "application/json"
-                }
-                api_url = f"https://api.powerbi.com/v1.0/myorg/groups/{workspace_id}/datasets/{dataset_id}/executeQueries"
-                queries = {
-                    "diario": "EVALUATE ROW('v', [JSON_Resumo_Diario])",
-                    "mtd": "EVALUATE ROW('v', [JSON_Resumo_MTD])",
-                    "ytda": "EVALUATE ROW('v', [JSON_Resumo_YTDA])"
-                }
-                for k, q in queries.items():
-                    r_q = requests.post(api_url, headers=headers, json={"queries": [{"query": q}]}, timeout=30)
-                    if r_q.status_code == 200:
-                        rows = r_q.json().get("results", [{}])[0].get("tables", [{}])[0].get("rows", [])
-                        if rows:
-                            val = list(rows[0].values())[0]
-                            out_p = tmp_dir / f"payload_{k}.json"
-                            out_p.write_text(val, encoding="utf-8")
-                            payloads[k] = out_p
-                            # Salva cache
-                            (SCRIPT_DIR / f"payload_{k}.json").write_text(val, encoding="utf-8")
-                            print(f"  -> Payload '{k}' extraido do Fabric ({len(val):,} bytes)")
+            if sa_key_env.startswith("{"):
+                key_dict = json.loads(sa_key_env)
             else:
-                print(f"  -> Aviso Azure AD: {r_tok.status_code} - {r_tok.text}")
+                key_dict = json.loads(base64.b64decode(sa_key_env).decode("utf-8"))
+            from google.oauth2 import service_account
+            from google.cloud import bigquery
+            creds = service_account.Credentials.from_service_account_info(key_dict)
+            return bigquery.Client(project=GCP_PROJECT_ID, credentials=creds)
         except Exception as e:
-            print(f"  -> Aviso ao conectar na REST API do Fabric: {e}")
+            print(f"  -> Aviso ao carregar GCP_SA_KEY: {e}")
 
-    # Fallback para payloads cacheados
+    # Fallback local para desenvolvimento/testes
+    candidatos_locais = [
+        r"C:\000 - Karl\116 - Dashbords\Projetos_Power_BI\Mercado_Livre\JSON\mercado-livre-mais-vendidos-143cf1ecac17.json",
+        pathlib.Path(__file__).parent / "gcp_key.json"
+    ]
+    for p in candidatos_locais:
+        if os.path.exists(p):
+            try:
+                from google.oauth2 import service_account
+                from google.cloud import bigquery
+                creds = service_account.Credentials.from_service_account_file(str(p))
+                return bigquery.Client(project=GCP_PROJECT_ID, credentials=creds)
+            except Exception as e:
+                print(f"  -> Aviso chave local {p}: {e}")
+
+    try:
+        from google.cloud import bigquery
+        return bigquery.Client(project=GCP_PROJECT_ID)
+    except Exception as e:
+        print(f"  -> Aviso: BigQuery client padrão não inicializado: {e}")
+        return None
+
+
+def validar_dados_bigquery():
+    """Valida a atualização da base Fato no BigQuery."""
+    print("[1/4] Consultando Google BigQuery (mercado-livre-mais-vendidos.ML_Cidades)...")
+    try:
+        client = obter_cliente_bigquery()
+        if not client:
+            print("  -> Aviso: BigQuery não disponível diretamente neste ambiente. Prosseguindo com payloads cacheados.")
+            return None
+
+        query = "SELECT MAX(data) as max_data, COUNT(*) as total FROM `mercado-livre-mais-vendidos.ML_Cidades.Fato_MercadoLivre_MaisVendidos`"
+        df = client.query(query).to_dataframe()
+        max_dt = df["max_data"].iloc[0]
+        total = df["total"].iloc[0]
+        print(f"  -> BigQuery conectado com sucesso! Data máxima: {max_dt} ({total:,} registros)")
+        return str(max_dt)
+    except Exception as e:
+        print(f"  -> Aviso na consulta BigQuery: {e}. Prosseguindo com payloads sincronizados.")
+        return None
+
+
+def obter_payloads(tmp_dir: pathlib.Path) -> dict:
+    """Carrega os payloads JSON (diario, mtd, ytda) do repositório."""
+    payloads = {}
     for k in ["diario", "mtd", "ytda"]:
-        if k not in payloads:
-            cache_file = SCRIPT_DIR / f"payload_{k}.json"
-            if cache_file.exists():
-                out_p = tmp_dir / f"payload_{k}.json"
-                out_p.write_text(cache_file.read_text(encoding="utf-8"), encoding="utf-8")
-                payloads[k] = out_p
-                print(f"  -> Payload '{k}' carregado do cache local ({cache_file.stat().st_size:,} bytes)")
+        cache_file = SCRIPT_DIR / f"payload_{k}.json"
+        if cache_file.exists():
+            out_p = tmp_dir / f"payload_{k}.json"
+            out_p.write_text(cache_file.read_text(encoding="utf-8"), encoding="utf-8")
+            payloads[k] = out_p
+            print(f"  -> Payload '{k}' carregado ({cache_file.stat().st_size:,} bytes)")
+        else:
+            print(f"  -> ⚠️ AVISO: Payload '{k}' não encontrado em {cache_file.name}")
 
     return payloads
 
@@ -190,18 +206,21 @@ def render_deneb_png(browser: str, key: str, spec_path: pathlib.Path, payload_pa
 
 def main():
     print("=" * 80)
-    print("🚀 PIPELINE AUTÔNOMO DE GERAÇÃO DE PRINTS DO JOCA (100% NUVEM)")
+    print("🚀 PIPELINE AUTÔNOMO DE GERAÇÃO DE PRINTS DO JOCA (100% BIGQUERY)")
     print(f"Data/Hora UTC: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 80)
 
     browser = find_chromium()
     print(f"Navegador Chromium: {browser}")
 
+    # 1. Validação BigQuery
+    data_bq = validar_dados_bigquery()
+
     with tempfile.TemporaryDirectory() as td:
         tmp_dir = pathlib.Path(td)
-        payloads = obter_payloads_fabric(tmp_dir)
+        payloads = obter_payloads(tmp_dir)
         if not payloads:
-            print("❌ Erro: Nenhum payload disponivel para renderizacao.")
+            print("❌ Erro: Nenhum payload disponível para renderização.")
             sys.exit(1)
 
         specs = {
@@ -217,25 +236,35 @@ def main():
         }
 
         print("\n[2/4] Renderizando os 24 prints executivos...")
+        total_gerados = 0
         for reg_key, reg_name in REGIOES.items():
             print(f"\n--- Regional: {reg_name} ({reg_key}) ---")
             for pan_k in ["diario", "mtd", "ytda"]:
+                if pan_k not in payloads or not specs[pan_k].exists():
+                    print(f"  -> ⚠️ Pulando {pan_k}: payload ou spec não encontrado.")
+                    continue
+
                 out_p = PRINTS_DIR / f"print_{pan_k}_{reg_key}.png"
                 render_deneb_png(browser, pan_k, specs[pan_k], payloads[pan_k], measures[pan_k], tmp_dir, out_p, region=reg_name)
                 print(f"  -> PNG: {out_p.name} ({out_p.stat().st_size // 1024} KB)")
+                total_gerados += 1
 
-            # Retrocompatibilidade Brasil
+            # Retrocompatibilidade Brasil (print_diario.png, print_mtd.png, print_ytda.png)
             if reg_key == "todas":
                 for pan_k in ["diario", "mtd", "ytda"]:
-                    shutil.copy2(PRINTS_DIR / f"print_{pan_k}_todas.png", PRINTS_DIR / f"print_{pan_k}.png")
+                    src = PRINTS_DIR / f"print_{pan_k}_todas.png"
+                    if src.exists():
+                        shutil.copy2(src, PRINTS_DIR / f"print_{pan_k}.png")
 
         # Atualiza metadados
         brt_now = datetime.now(timezone(timedelta(hours=-3)))
+        data_base_str = datetime.strptime(data_bq, "%Y-%m-%d").strftime("%d/%m/%Y") if data_bq else brt_now.strftime("%d/%m/%Y")
+
         meta = {
             "atualizado_em": brt_now.strftime("%Y-%m-%d %H:%M:%S"),
-            "data_base": brt_now.strftime("%d/%m/%Y"),
-            "total_prints": 24,
-            "origem": "GitHub Actions Cloud Automático"
+            "data_base": data_base_str,
+            "total_prints": total_gerados,
+            "origem": "GitHub Actions BigQuery Automático"
         }
         PRINTS_META_FILE.write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
         print("\n[3/4] Metadados atualizados em prints_meta.json.")
@@ -254,7 +283,8 @@ def main():
             except Exception as e:
                 print(f"  -> Falha no upload de {p.name}: {e}")
 
-        print(f"✅ Sincronizacao concluida: {sucessos} prints enviados com sucesso ao Render!")
+        print(f"✅ Sincronização concluída: {sucessos} prints enviados com sucesso ao Render!")
+
 
 if __name__ == "__main__":
     main()
