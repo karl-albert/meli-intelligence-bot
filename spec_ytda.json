@@ -524,7 +524,7 @@
     },
     {
       "name": "selectedMonthIndex",
-      "value": 21,
+      "value": null,
       "description": "Índice do mês selecionado (dinâmico de 0 a 21, padrão: último mês)",
       "init": "length(data('meses_base')) - 1",
       "on": [
