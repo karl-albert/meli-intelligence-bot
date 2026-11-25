@@ -690,7 +690,7 @@ def processar_envio_prints(chat_id, tipos, user_name, base_url):
         return msg_ajuda
 
     meta = _carregar_meta_prints()
-    data_ref = meta.get("data_ref") or str(data_recente or "N/D")
+    data_ref = meta.get("data_ref") or meta.get("data_base") or str(data_recente or "N/D")
 
     enviados = []
     faltando = []
@@ -3825,6 +3825,16 @@ def sync_print():
         return jsonify({"status": "ready", "meta": meta, "prints": disponiveis}), 200
 
     tipo = (request.args.get("tipo") or request.form.get("tipo") or "").strip().lower()
+    if tipo in ["meta", "prints_meta"]:
+        if "file" not in request.files or request.files["file"].filename == "":
+            return jsonify({"status": "error", "message": "Nenhum arquivo de metadados enviado."}), 400
+        try:
+            request.files["file"].save(PRINTS_META_FILE)
+            logger.info("✅ [SYNC PRINT] prints_meta.json atualizado com sucesso via sync.")
+            return jsonify({"status": "success", "tipo": "meta"}), 200
+        except Exception as e:
+            return jsonify({"status": "error", "message": str(e)}), 500
+
     if tipo not in PRINTS_CATALOGO:
         return jsonify({
             "status": "error",
@@ -3843,6 +3853,7 @@ def sync_print():
         data_ref = (request.args.get("data_ref") or request.form.get("data_ref") or "").strip()
         if data_ref:
             meta["data_ref"] = data_ref
+            meta["data_base"] = data_ref
         meta["atualizado_em"] = datetime.now(BRT_TZ).strftime("%d/%m/%Y %H:%M")
         meta.setdefault("arquivos", {})[tipo] = PRINTS_CATALOGO[tipo]["arquivo"]
         with open(PRINTS_META_FILE, "w", encoding="utf-8") as fm:

@@ -510,8 +510,9 @@ def atualizar_payloads_dinamicos(client, out_dir: pathlib.Path):
     return dt_str
 
 
-def render_deneb_png(browser: str, key: str, spec_path: pathlib.Path, payload_path: pathlib.Path, measure_name: str, tmp_dir: pathlib.Path, out_png: pathlib.Path, region: str = "Todas as Regiões"):
-    svg_path = tmp_dir / f"{key}_{region}.svg"
+def render_deneb_png(browser: str, key: str, spec_path: pathlib.Path, payload_path: pathlib.Path, measure_name: str, tmp_dir: pathlib.Path, out_png: pathlib.Path, region: str = "Todas as Regiões", reg_key: str = "todas"):
+    safe_name = f"{key}_{reg_key}"
+    svg_path = tmp_dir / f"{safe_name}.svg"
     render_js = SCRIPT_DIR / "render_deneb_svg.js"
     res = subprocess.run(
         ["node", str(render_js), str(spec_path), str(payload_path), measure_name, str(svg_path), "Light", region],
@@ -556,21 +557,33 @@ def render_deneb_png(browser: str, key: str, spec_path: pathlib.Path, payload_pa
 </body>
 </html>"""
 
-    html_path = tmp_dir / f"{key}_{region}.html"
+    html_path = tmp_dir / f"{safe_name}.html"
     html_path.write_text(html_content, encoding="utf-8")
+
+    # Remove arquivo de saída existente para validar que foi gerado novo print
+    if out_png.exists():
+        try:
+            out_png.unlink()
+        except Exception:
+            pass
 
     cmd = [
         browser,
         "--headless=new",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
         "--disable-gpu",
         "--hide-scrollbars",
         "--force-device-scale-factor=1.5",
         "--window-size=1380,760",
         "--virtual-time-budget=3000",
         f"--screenshot={str(out_png)}",
-        html_path.resolve().as_uri() if sys.platform == "win32" else f"file://{html_path.resolve()}",
+        html_path.resolve().as_uri(),
     ]
-    subprocess.run(cmd, check=True, capture_output=True)
+    sub_res = subprocess.run(cmd, capture_output=True, text=True)
+    if sub_res.returncode != 0 or not out_png.exists() or out_png.stat().st_size == 0:
+        raise RuntimeError(f"Chromium falhou ao gerar screenshot para {out_png.name} (exit {sub_res.returncode}):\n{sub_res.stderr}\n{sub_res.stdout}")
 
 
 def main():
@@ -621,7 +634,7 @@ def main():
                     continue
 
                 out_p = PRINTS_DIR / f"print_{pan_k}_{reg_key}.png"
-                render_deneb_png(browser, pan_k, specs[pan_k], payloads[pan_k], measures[pan_k], tmp_dir, out_p, region=reg_name)
+                render_deneb_png(browser, pan_k, specs[pan_k], payloads[pan_k], measures[pan_k], tmp_dir, out_p, region=reg_name, reg_key=reg_key)
                 print(f"  -> PNG: {out_p.name} ({out_p.stat().st_size // 1024} KB)")
                 total_gerados += 1
 
@@ -636,6 +649,7 @@ def main():
         meta = {
             "atualizado_em": brt_now.strftime("%Y-%m-%d %H:%M:%S"),
             "data_base": data_base_str,
+            "data_ref": data_base_str,
             "total_prints": total_gerados,
             "origem": "GitHub Actions BigQuery Dinâmico 24/7"
         }
@@ -645,16 +659,27 @@ def main():
         # 4. Upload dos Prints para o Render
         print(f"\n[4/5] Enviando prints para o Render ({RENDER_BASE_URL})...")
         sucessos = 0
-        for p in PRINTS_DIR.glob("print_*.png"):
+        for p in sorted(PRINTS_DIR.glob("print_*.png")):
             tipo = p.stem.replace("print_", "")
-            url = f"{RENDER_BASE_URL}/sync_print?secret={SYNC_SECRET}&tipo={tipo}"
+            url = f"{RENDER_BASE_URL}/sync_print?secret={SYNC_SECRET}&tipo={tipo}&data_ref={data_base_str}"
             try:
                 with open(p, "rb") as f:
                     r = requests.post(url, files={"file": f}, timeout=30)
                 if r.status_code == 200:
                     sucessos += 1
+                else:
+                    print(f"  -> Aviso ({r.status_code}) ao sincronizar {p.name}: {r.text[:80]}")
             except Exception as e:
                 print(f"  -> Falha no upload de {p.name}: {e}")
+
+        # Sincroniza também o arquivo de metadados
+        if PRINTS_META_FILE.exists():
+            url_meta = f"{RENDER_BASE_URL}/sync_print?secret={SYNC_SECRET}&tipo=meta&data_ref={data_base_str}"
+            try:
+                with open(PRINTS_META_FILE, "rb") as f:
+                    requests.post(url_meta, files={"file": f}, timeout=30)
+            except Exception as e:
+                print(f"  -> Falha no upload de prints_meta.json: {e}")
 
         print(f"✅ Sincronização concluída: {sucessos} prints enviados com sucesso ao Render!")
 
