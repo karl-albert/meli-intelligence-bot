@@ -2,4 +2,5 @@ __pycache__/
 *.pyc
 .env
 teams_karl_session.json
+.temp_render/
 

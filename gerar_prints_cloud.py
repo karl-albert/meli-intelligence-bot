@@ -159,12 +159,13 @@ def get_dif_fmt(dif, is_currency=True):
 
 def find_chromium() -> str:
     candidates = [
+        "google-chrome-stable",
+        "google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/google-chrome",
         "chromium-browser",
         "chromium",
-        "google-chrome",
-        "google-chrome-stable",
         "/usr/bin/chromium-browser",
-        "/usr/bin/google-chrome",
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
         r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
@@ -174,7 +175,7 @@ def find_chromium() -> str:
             return w
         if os.path.exists(c):
             return c
-    return "chromium"
+    return "google-chrome"
 
 
 def obter_cliente_bigquery():
@@ -600,9 +601,9 @@ def main():
         print("❌ Erro: Cliente BigQuery não inicializado.")
         sys.exit(1)
 
-    with tempfile.TemporaryDirectory() as td:
-        tmp_dir = pathlib.Path(td)
-
+    tmp_dir = SCRIPT_DIR / ".temp_render"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    try:
         # 1. Geração Dinâmica de Payloads
         data_base_str = atualizar_payloads_dinamicos(client, tmp_dir)
 
@@ -693,6 +694,8 @@ def main():
             print(f"  -> Parquet local atualizado ({len(df_pq)} linhas até {df_pq['data'].max()}).")
         except Exception as e_pq:
             print(f"  -> Aviso ao atualizar Parquet: {e_pq}")
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":

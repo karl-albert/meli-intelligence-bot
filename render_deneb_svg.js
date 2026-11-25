@@ -24,7 +24,7 @@ if (!vega) {
 const registeredPatterns = new Map();
 function registerPatternFunc(targetModule) {
   if (targetModule && targetModule.expressionFunction) {
-    targetModule.expressionFunction('pbiPatternSVG', function(pattern, fg, bg) {
+    targetModule.expressionFunction('pbiPatternSVG', function (pattern, fg, bg) {
       const fgColor = fg || '#94A3B8';
       const bgColor = bg || 'transparent';
       const id = `pbi_pat_${pattern}_${fgColor.replace(/[^a-zA-Z0-9]/g, '')}_${bgColor.replace(/[^a-zA-Z0-9]/g, '')}`;
@@ -44,7 +44,7 @@ try {
   // Ignore if not present
 }
 
-const [,, specPath, payloadPath, measureName, outSvgPath, themeArg, regionArg] = process.argv;
+const [, , specPath, payloadPath, measureName, outSvgPath, themeArg, regionArg] = process.argv;
 if (!specPath || !payloadPath || !measureName || !outSvgPath) {
   console.error('Uso: node render_deneb_svg.js <spec.json> <payload.json> <measureName> <out.svg> [theme] [region]');
   process.exit(1);
