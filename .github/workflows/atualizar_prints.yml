@@ -3,13 +3,13 @@ name: Atualizar Prints Executivos ML (BigQuery Nuvem 24/7)
 on:
   schedule:
     # 08h30 Horário de Brasília (BRT / UTC-3) -> 11h30 UTC (Abertura Comercial)
-    - cron: '30 11 * * *'
+    - cron: '27 11 * * *'
     # 14h00 Horário de Brasília (BRT / UTC-3) -> 17h00 UTC (Check Intermediário)
-    - cron: '0 17 * * *'
+    - cron: '03 17 * * *'
     # 18h30 Horário de Brasília (BRT / UTC-3) -> 21h30 UTC (Pico da Tarde)
-    - cron: '30 21 * * *'
+    - cron: '32 21 * * *'
     # 23h45 Horário de Brasília (BRT / UTC-3) -> 02h45 UTC (Fechamento do Dia)
-    - cron: '45 2 * * *'
+    - cron: '43 2 * * *'
   workflow_dispatch: # Permite disparo manual imediato pelo GitHub a qualquer momento
 
 jobs:
